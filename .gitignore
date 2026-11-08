@@ -1,0 +1,21 @@
+# Локальные данные и секреты
+data/config.json
+data/last_results.json
+data/cache/
+data/history.db
+data/history.db-wal
+data/history.db-shm
+data/dead_items.json
+data/portfolio.db
+data/app.log
+data/launcher.log
+data/catalog.json
+
+# Сборка
+build/
+dist/
+*.exe
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SZAUCTRACKER · сканер аукциона</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark">SZ</span>
+    <div>
+      <h1><span class="sz">SZ</span>AUCTRACKER</h1>
+      <p>аукцион · средняя цена · скидки</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="statusPill" class="pill idle"><span class="dot"></span><span id="statusText">ожидание</span></span>
+    <button id="cancelBtn" class="btn danger ghost hidden">Отменить</button>
+    <button id="scanBtn" class="btn primary">Сканировать</button>
+  </div>
+</header>
+
+<div id="banner" class="banner hidden"></div>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="deals">Сделки <span id="dealsBadge" class="badge">0</span></button>
+  <button class="tab" data-tab="stacks">Стаки <span id="stacksBadge" class="badge muted">0</span></button>
+  <button class="tab" data-tab="analytics">Аналитика</button>
+  <button class="tab" data-tab="portfolio">Портфель</button>
+  <button class="tab" data-tab="watch">Наблюдение <span id="watchBadge" class="badge">0</span></button>
+  <button class="tab" data-tab="settings">Настройки</button>
+</nav>
+
+<main>
+
+<!-- ============================ СДЕЛКИ ============================ -->
+<section id="tab-deals" class="tab-panel active">
+  <div class="summary" id="summary">
+    <div class="stat"><span class="stat-label">Найдено сделок</span><strong id="statDeals">—</strong><span class="stat-sub" id="statDealsSub">ещё не сканировали</span></div>
+    <div class="stat accent"><span class="stat-label">Потенциальная прибыль</span><strong id="statProfit">—</strong><span class="stat-sub">после комиссии, за все лоты</span></div>
+    <div class="stat"><span class="stat-label">Предметов проверено</span><strong id="statItems">—</strong><span class="stat-sub" id="statItemsSub">—</span></div>
+    <div class="stat"><span class="stat-label">Обновлено</span><strong id="statUpdated">—</strong><span class="stat-sub" id="statUpdatedSub">—</span></div>
+  </div>
+
+  <div class="toolbar">
+    <input id="dealSearch" class="input" type="search" placeholder="Поиск по названию или ID…" autocomplete="off">
+    <select id="dealCategory" class="input select"><option value="">Все категории</option></select>
+    <select id="dealMinDiscount" class="input select">
+      <option value="0">Любая скидка</option>
+      <option value="10">от 10%</option>
+      <option value="15">от 15%</option>
+      <option value="20">от 20%</option>
+      <option value="30">от 30%</option>
+    </select>
+    <select id="dealMinProfit" class="input select">
+      <option value="0">Любая прибыль</option>
+      <option value="10000">прибыль от 10k</option>
+      <option value="25000">от 25k</option>
+      <option value="50000">от 50k</option>
+      <option value="100000">от 100k</option>
+      <option value="250000">от 250k</option>
+    </select>
+    <select id="dealMinPrice" class="input select">
+      <option value="0">Любая цена</option>
+      <option value="10000">цена от 10k</option>
+      <option value="50000">от 50k</option>
+      <option value="100000">от 100k</option>
+      <option value="500000">от 500k</option>
+    </select>
+    <select id="dealMaxLots" class="input select">
+      <option value="0">Любое кол-во лотов</option>
+      <option value="5">до 5 лотов</option>
+      <option value="20">до 20</option>
+      <option value="100">до 100</option>
+      <option value="500">до 500</option>
+    </select>
+    <select id="dealMinQlt" class="input select">
+      <option value="">Любое качество</option>
+      <option value="0">Обычный</option>
+      <option value="1">Необычный</option>
+      <option value="2">Особый</option>
+      <option value="3">Редкий</option>
+      <option value="4">Исключительный</option>
+      <option value="5">Легендарный</option>
+    </select>
+    <input id="dealMinPercent" class="input" type="number" min="0" max="200" step="1" placeholder="% артефакта" style="width:120px">
+    <select id="dealBonus" class="input select"><option value="">Любой бонус</option></select>
+    <select id="dealSort" class="input select">
+      <option value="total" selected>Сначала больше сумма</option>
+      <option value="discount">Сначала выгоднее (%)</option>
+      <option value="profit">Сначала больше профит / шт.</option>
+      <option value="time">Сначала истекающие</option>
+      <option value="volume">Сначала ликвидные</option>
+    </select>
+    <label class="check"><input type="checkbox" id="onlyLiquid"> только ликвидные</label>
+    <a id="csvLink" class="btn ghost hidden" href="/api/export.csv">CSV</a>
+  </div>
+
+  <p class="hint" id="calcHint"></p>
+  <p class="hint warn hidden" id="coverageHint"></p>
+  <p class="hint warn hidden" id="deadHint"></p>
+
+  <div class="table-wrap">
+    <table class="table deals-table">
+      <thead>
+        <tr>
+          <th>Предмет</th>
+          <th>Вариант</th>
+          <th class="num">Лот / шт.</th>
+          <th class="num">Кол-во</th>
+          <th class="num">Профит всего</th>
+          <th class="num">Скидка</th>
+          <th class="num">Профит / шт.</th>
+          <th class="num">База / шт.</th>
+          <th class="num">Рынок / шт.</th>
+          <th class="num">Продаж</th>
+          <th class="num">Истекает</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="dealsBody"></tbody>
+    </table>
+    <div id="dealsEmpty" class="empty">
+      <div class="empty-mark">◇</div>
+      <h3>Пока пусто</h3>
+      <p id="dealsEmptyText">Добавьте предметы во вкладке «Наблюдение» и нажмите «Сканировать».</p>
+    </div>
+  </div>
+
+  <details class="no-deals" id="noDealsBlock">
+    <summary>Предметы без выгодных лотов <span id="noDealsCount" class="badge">0</span></summary>
+    <div class="table-wrap">
+      <table class="table compact">
+        <thead>
+          <tr><th>Предмет</th><th>Статус</th><th class="num">Лотов</th><th class="num">Продаж за окно</th><th class="num">Мин. лот / шт.</th><th class="num">Лучшая скидка</th></tr>
+        </thead>
+        <tbody id="noDealsBody"></tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<!-- ============================ СТАКИ ============================ -->
+<section id="tab-stacks" class="tab-panel">
+  <div class="summary">
+    <div class="stat"><span class="stat-label">Возможностей</span><strong id="statStacks">—</strong><span class="stat-sub">стак ↔ поштучно</span></div>
+    <div class="stat accent"><span class="stat-label">Потенциальная прибыль</span><strong id="statStacksProfit">—</strong><span class="stat-sub">после комиссии</span></div>
+    <div class="stat"><span class="stat-label">Цель</span><strong id="statStackQty">100</strong><span class="stat-sub">штук в стаке</span></div>
+    <div class="stat"><span class="stat-label">Порог выгоды</span><strong id="statStackThreshold">10%</strong><span class="stat-sub">от цены покупки</span></div>
+  </div>
+
+  <div class="panel stack-source">
+    <div class="panel-head">
+      <h2>Где искать стаки</h2>
+      <button type="button" id="stackScanBtn" class="btn primary small">Сканировать</button>
+    </div>
+    <p class="hint">Стаки ищутся среди предметов в общем списке наблюдения. Артефакты всегда идут по 1 шт. и сюда не попадут — добавляйте расходники, патроны, ресурсы, фрагменты и контейнеры.</p>
+    <div class="chips">
+      <button type="button" class="btn small" data-stack-cat="consumables" data-limit="100">＋ Расходники (до 100)</button>
+      <button type="button" class="btn small" data-stack-cat="containers" data-limit="50">＋ Контейнеры (до 50)</button>
+      <button type="button" class="btn small" data-stack-cat="other" data-limit="100">＋ Прочее (до 100)</button>
+    </div>
+    <p class="hint" id="stackScopeHint">—</p>
+  </div>
+
+  <div class="toolbar">
+    <input id="stackSearch" class="input" type="search" placeholder="Поиск по названию или ID…" autocomplete="off">
+    <select id="stackDirection" class="input select">
+      <option value="">Оба направления</option>
+      <option value="bulk_to_singles">Купить стак → продать поштучно</option>
+      <option value="singles_to_bulk">Купить поштучно → продать стаком</option>
+    </select>
+    <select id="stackMinMargin" class="input select">
+      <option value="0">Любая маржа</option>
+      <option value="10">от 10%</option>
+      <option value="15">от 15%</option>
+      <option value="20">от 20%</option>
+      <option value="30">от 30%</option>
+    </select>
+    <select id="stackSort" class="input select">
+      <option value="margin">Сначала выгоднее</option>
+      <option value="profit">Сначала больше прибыль</option>
+      <option value="qty">Сначала больше объём</option>
+    </select>
+    <a id="stackCsvLink" class="btn ghost hidden" href="/api/export_stacks.csv">CSV</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table stacks-table">
+      <thead>
+        <tr>
+          <th>Предмет</th>
+          <th>Направление</th>
+          <th class="num">Кол-во</th>
+          <th class="num">Купить</th>
+          <th class="num">Продать</th>
+          <th class="num">Профит</th>
+          <th class="num">Маржа</th>
+          <th class="num">Одиночные</th>
+          <th class="num">Стаки</th>
+          <th class="num">Продаж</th>
+          <th><span class="sr-only">Действия</span></th>
+        </tr>
+      </thead>
+      <tbody id="stacksBody"></tbody>
+    </table>
+    <div id="stacksEmpty" class="empty">
+      <div class="empty-mark">⇄</div>
+      <h3>Возможностей пока нет</h3>
+      <p id="stacksEmptyText">Добавьте расходники или ресурсы и запустите скан. Артефакты по 1 шт. здесь не участвуют.</p>
+    </div>
+  </div>
+  <p class="hint warn hidden" id="stackCoverageHint"></p>
+</section>
+
+<!-- ============================ АНАЛИТИКА ============================ -->
+<section id="tab-analytics" class="tab-panel">
+  <div class="toolbar">
+    <select id="analyticsItem" class="input select"></select>
+    <select id="analyticsDays" class="input select">
+      <option value="2">2 дня</option>
+      <option value="7" selected>7 дней</option>
+      <option value="30">30 дней</option>
+      <option value="90">90 дней</option>
+    </select>
+    <select id="analyticsVariant" class="input select"></select>
+    <button type="button" id="analyticsRefresh" class="btn">Обновить</button>
+  </div>
+
+  <div class="analytics-grid">
+    <div class="panel chart-panel">
+      <div class="panel-head">
+        <h2>История цены</h2>
+        <span id="analyticsRange" class="muted"></span>
+      </div>
+      <div id="analyticsChart" class="chart"></div>
+      <p class="hint">Линия — медиана продаж, полоса — 25–75 перцентили, столбики — объём за день.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Рынок и совет</h2></div>
+      <div id="analyticsMarket"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Глубина рынка</h2><span id="analyticsDepthInfo" class="muted"></span></div>
+    <div id="analyticsDepth"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Последние продажи</h2><span id="analyticsRecentCount" class="muted"></span></div>
+    <div class="table-wrap">
+      <table class="table compact">
+        <thead>
+          <tr>
+            <th>Время</th>
+            <th>Вариант</th>
+            <th class="num">Цена / шт.</th>
+            <th class="num">Кол-во</th>
+            <th class="num">Сумма</th>
+          </tr>
+        </thead>
+        <tbody id="analyticsRecent"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ПОРТФЕЛЬ ============================ -->
+<section id="tab-portfolio" class="tab-panel">
+  <div class="summary">
+    <div class="stat"><span class="stat-label">Открытые позиции</span><strong id="pfOpen">—</strong><span class="stat-sub" id="pfOpenSub">—</span></div>
+    <div class="stat"><span class="stat-label">Вложено</span><strong id="pfInvested">—</strong><span class="stat-sub">в открытые позиции</span></div>
+    <div class="stat accent"><span class="stat-label">Нереализованная прибыль</span><strong id="pfUnrealized">—</strong><span class="stat-sub">после комиссии</span></div>
+    <div class="stat"><span class="stat-label">Реализовано</span><strong id="pfRealized">—</strong><span class="stat-sub">после комиссии</span></div>
+  </div>
+
+  <div class="toolbar">
+    <select id="portfolioFilter" class="input select">
+      <option value="open" selected>Открытые</option>
+      <option value="all">Все</option>
+      <option value="sold">Проданные</option>
+    </select>
+    <button type="button" id="portfolioRefresh" class="btn">Обновить</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Предмет</th>
+          <th>Куплено</th>
+          <th class="num">Вложено</th>
+          <th class="num">Текущая / продажа</th>
+          <th class="num">Стоимость</th>
+          <th class="num">Профит</th>
+          <th class="num">Цель</th>
+          <th>Статус</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="portfolioBody"></tbody>
+    </table>
+    <div id="portfolioEmpty" class="empty">
+      <div class="empty-mark">▤</div>
+      <h3>Портфель пуст</h3>
+      <p>Откройте «Сделки», раскройте лот и нажмите «Купил».</p>
+    </div>
+  </div>
+  <p class="hint" id="portfolioHint">Текущая стоимость считается по 25-му перцентилю активных лотов; профит — после комиссии.</p>
+</section>
+
+<!-- ============================ НАБЛЮДЕНИЕ ============================ -->
+<section id="tab-watch" class="tab-panel">
+  <div class="split">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Добавить предметы</h2>
+        <span class="muted" id="catalogState">справочник загружается…</span>
+      </div>
+      <input id="catalogSearch" class="input" type="search" placeholder="Название или ID, например «Виток» или 1kdg" autocomplete="off">
+      <div id="categoryChips" class="chips"></div>
+      <div id="catalogResults" class="pick-list"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Список наблюдения</h2>
+        <span class="count-pill"><span id="watchCount">0</span> / 500</span>
+      </div>
+      <p class="hint" id="watchEstimate">—</p>
+      <div id="watchList" class="watch-list"></div>
+      <div class="panel-actions">
+        <button id="clearWatchBtn" class="btn danger ghost">Очистить всё</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="ruleEditor">
+    <div class="panel-head">
+      <h2 id="ruleTitle">Правило предмета</h2>
+      <button type="button" class="btn icon" id="ruleClose" title="Закрыть">×</button>
+    </div>
+    <div class="grid">
+      <label class="check-line"><input type="checkbox" id="ruleEnabled"> Сканировать предмет</label>
+      <label>Мин. цена, за шт.
+        <input id="ruleMinPrice" class="input" type="number" min="0" step="1000" placeholder="как глобально">
+      </label>
+      <label>Мин. прибыль, руб.
+        <input id="ruleMinProfit" class="input" type="number" min="0" step="1000" placeholder="как глобально">
+      </label>
+      <label>Качество
+        <select id="ruleQlt" class="input select">
+          <option value="">Любое</option>
+          <option value="0">Обычный</option>
+          <option value="1">Необычный</option>
+          <option value="2">Особый</option>
+          <option value="3">Редкий</option>
+          <option value="4">Исключительный</option>
+          <option value="5">Легендарный</option>
+        </select>
+      </label>
+      <label>Мин. процент артефакта
+        <input id="ruleMinPercent" class="input" type="number" min="0" max="200" step="1" placeholder="любой">
+      </label>
+      <label>Бонус
+        <select id="ruleBonus" class="input select"><option value="">Любой</option></select>
+      </label>
+    </div>
+    <p class="hint">Правило применяется к этому предмету при следующем скане. Пустые поля означают глобальные настройки.</p>
+    <div class="form-actions">
+      <button type="button" id="ruleSave" class="btn primary">Сохранить правило</button>
+      <button type="button" id="ruleReset" class="btn ghost">Сбросить</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ НАСТРОЙКИ ============================ -->
+<section id="tab-settings" class="tab-panel">
+  <form id="settingsForm" class="settings">
+    <div class="panel">
+      <div class="panel-head"><h2>Доступ к API</h2><button type="button" id="checkBtn" class="btn ghost">Проверить доступ</button></div>
+      <p class="hint">Ключи выдаёт Telegram-бот <a href="https://t.me/stalzone_api_bot" target="_blank" rel="noreferrer">@stalzone_api_bot</a> командой <code>/newapp</code>. Секрет хранится только на этом компьютере в <code>data/config.json</code> и не отправляется в интерфейс.</p>
+      <div class="grid">
+        <label>Client-Id
+          <input name="client_id" class="input" type="text" autocomplete="off" placeholder="например 30">
+        </label>
+        <label>Client-Secret
+          <input name="client_secret" class="input" type="password" autocomplete="new-password" placeholder="секретный ключ">
+        </label>
+        <label>Регион
+          <select name="region" class="input select" id="regionSelect"></select>
+        </label>
+        <label class="toggle-line">Демо-режим
+          <input name="demo" type="checkbox" class="switch">
+          <span class="switch-ui"></span>
+        </label>
+      </div>
+      <p class="hint" id="secretHint"></p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Логика поиска</h2></div>
+      <div class="grid">
+        <label>Окно истории, дней
+          <input name="days" class="input" type="number" min="0.25" max="30" step="0.25">
+          <span class="field-hint">средняя цена считается по фактическим продажам за этот период</span>
+        </label>
+        <label>Порог скидки, %
+          <input name="threshold_pct" class="input" type="number" min="0.5" max="90" step="0.5">
+          <span class="field-hint">лот должен быть дешевле базы минимум на столько</span>
+        </label>
+        <label>Комиссия аукциона, %
+          <input name="commission_pct" class="input" type="number" min="0" max="50" step="0.5">
+          <span class="field-hint">вычитается из цены будущей продажи при расчёте профита</span>
+        </label>
+        <label>База сравнения
+          <select name="benchmark" class="input select">
+            <option value="median">Медиана продаж (устойчива к выбросам)</option>
+            <option value="mean">Средняя арифметическая продаж</option>
+            <option value="trimmed">Усечённая средняя продаж (10%)</option>
+            <option value="lots">Медиана активных лотов (текущий рынок)</option>
+            <option value="blend">Смешанная: продажи + активные лоты</option>
+          </select>
+          <span class="field-hint">«Активные лоты» — оптимистичная оценка: лоты могут стоять выше реальных продаж.</span>
+        </label>
+        <label class="check-line"><input name="cap_by_market" type="checkbox"> Ограничивать базу текущим рынком</label>
+        <label>Мин. продаж в окне, шт.
+          <input name="min_volume" class="input" type="number" min="0" max="100000" step="1">
+          <span class="field-hint">0 — показывать даже при одном-двух продажах (низкая надёжность)</span>
+        </label>
+        <label>Мин. цена лота, за шт.
+          <input name="min_price" class="input" type="number" min="0" step="100">
+          <span class="field-hint">дешёвые расходники скрываются; по умолчанию 5 000, 0 — показывать всё</span>
+        </label>
+        <label>Макс. цена лота, за шт.
+          <input name="max_price" class="input" type="number" min="0" step="100">
+          <span class="field-hint">0 — без ограничения</span>
+        </label>
+        <label>Мин. прибыль на возможность, руб.
+          <input name="min_profit" class="input" type="number" min="0" step="500">
+          <span class="field-hint">одинаковые лоты склеиваются, прибыль считается по сумме; по умолчанию 5 000</span>
+        </label>
+        <label>Страниц лотов (1 стр. = 200 лотов)
+          <input name="lots_pages" class="input" type="number" min="1" max="5" step="1">
+        </label>
+        <label class="check-line"><input name="group_by_qlt" type="checkbox"> Сравнивать только одинаковое качество</label>
+        <label class="check-line"><input name="group_by_ptn" type="checkbox"> Сравнивать только одинаковый паттерн / апгрейд</label>
+      </div>
+      <p class="hint">«Ограничивать базу текущим рынком» не даёт средней по прошлым продажам завышать цену продажи, если рынок уже упал: для каждого лота база ограничивается 25-м перцентилем цен конкурирующих лотов того же варианта. Отключите, если хотите видеть чистую медиану продаж.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Арбитраж стаков</h2></div>
+      <div class="grid">
+        <label>Целевое количество, шт.
+          <input name="stack_qty" class="input" type="number" min="2" max="10000" step="1">
+          <span class="field-hint">сколько штук нужно купить и продать</span>
+        </label>
+        <label>Порог выгоды, %
+          <input name="stack_threshold_pct" class="input" type="number" min="0.5" max="90" step="0.5">
+          <span class="field-hint">чистая маржа после комиссии, при которой показывать возможность</span>
+        </label>
+        <label>Мин. продаж на стороне продажи
+          <input name="stack_min_sales" class="input" type="number" min="0" max="1000" step="1">
+          <span class="field-hint">сколько сделок в истории нужно, чтобы доверять цене</span>
+        </label>
+      </div>
+      <p class="hint">Стак покупается целыми лотами: если нет лота нужного объёма, приложение добирает целые лоты до цели (может получиться больше штук). Продажа 100 отдельных единиц — это 100 действий; комиссия учтена, взнос за выставление и время — нет.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Автоматизация</h2></div>
+      <div class="grid">
+        <label class="toggle-line">Автоскан
+          <input name="auto_scan" type="checkbox" class="switch">
+          <span class="switch-ui"></span>
+        </label>
+        <label>Интервал автоскана, мин
+          <input name="scan_interval_min" class="input" type="number" min="1" max="180" step="1">
+        </label>
+        <label>Параллельных запросов
+          <input name="scan_workers" class="input" type="number" min="1" max="8" step="1">
+          <span class="field-hint">больше — быстрее, но выше лимита API не прыгнуть</span>
+        </label>
+        <label>Обновлять историю, мин
+          <input name="history_ttl_min" class="input" type="number" min="1" max="1440" step="1">
+          <span class="field-hint">лоты обновляются каждый скан, история — реже; база всё равно ограничивается текущим рынком</span>
+        </label>
+      </div>
+      <p class="hint">Лимит API — 400 токенов/мин, один запрос аукциона стоит 2 токена. Приложение само выдерживает темп (~190 запросов/мин), запрашивает предметы параллельно и не тратит запрос истории на предметы без лотов.</p>
+      <p class="hint">API отдаёт только <b>200 последних продаж</b> на предмет. Приложение сохраняет их в локальную базу и постепенно накапливает полное окно — поэтому в первые часы покрытие может быть меньше выбранных дней. Реальное покрытие видно в деталях сделки.</p>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn primary">Сохранить настройки</button>
+      <button type="button" id="saveAndScanBtn" class="btn">Сохранить и сканировать</button>
+      <button type="button" id="clearSecretBtn" class="btn danger ghost">Удалить секрет</button>
+      <span id="settingsStatus" class="muted"></span>
+    </div>
+  </form>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div id="apiInfo">API: —</div>
+  <div>Локальное приложение · данные никуда не отправляются, кроме eapi.stalzone.com</div>
+</footer>
+
+<div id="toasts" class="toasts"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
