@@ -313,12 +313,13 @@ tests.py            77 тестов логики
 start.bat           запуск из исходников в Windows
 SZAUCTRACKER.spec  конфигурация PyInstaller для пересборки
 make_icon.py        генератор иконки (все размеры ICO, включая 16×16)
+requirements-dev.txt  PyInstaller и Pillow для сборки/иконки (не нужны для запуска)
 ```
 
 ## Пересборка exe
 
 ```bat
-python -m pip install pyinstaller
+python -m pip install -r requirements-dev.txt
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name SZAUCTRACKER ^
   --icon "assets/icon.ico" ^
@@ -363,5 +364,10 @@ python -m unittest tests.py -v
 | «N недействительных ID» | удалите их кнопкой в «Сделках» — они не тратят запросы |
 
 ---
+
+## Лицензия
+
+Код распространяется под [MIT](LICENSE). Справочник предметов и данные аукциона
+принадлежат их правообладателям; в репозитории они не хранятся.
 
 Неофициальный инструмент. Не связан с EXBO. Соблюдайте правила игры и лимиты API.
