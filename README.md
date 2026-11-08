@@ -1,5 +1,7 @@
 # SZAUCTRACKER
 
+[![tests](https://github.com/Lolezhechka/szauctracker/actions/workflows/tests.yml/badge.svg)](https://github.com/Lolezhechka/szauctracker/actions/workflows/tests.yml)
+
 Локальный сканер аукциона STALZONE (STALCRAFT). Считает реальную среднюю цену предмета
 по проданным лотам за последние дни и показывает активные лоты, которые дешевле этой
 цены больше чем на заданный процент — чтобы вы могли зайти в игру и выгодно перепродать.
