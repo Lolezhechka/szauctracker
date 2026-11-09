@@ -7,10 +7,12 @@ import os
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from barter import BarterBook, calculate_item
+from fast_monitor import FastMonitor
 from catalog import Catalog
 from history_store import HistoryStore
 from market_store import MarketStore
@@ -1134,6 +1136,86 @@ class HistoryPaginationTests(unittest.TestCase):
         )
         self.assertEqual(len(prices), 2)
         self.assertEqual(len(client.calls), 2)
+
+
+class FastMonitorTests(unittest.TestCase):
+    class Store:
+        def __init__(self):
+            self.config = {
+                "demo": False,
+                "client_id": "1",
+                "client_secret": "secret",
+                "watchlist": ["a"],
+                "item_rules": {"a": {"fast": True}},
+                "threshold_pct": 10,
+                "commission_pct": 5,
+                "min_price": 0,
+                "min_profit": 0,
+                "fast_interval_sec": 30,
+            }
+
+        def snapshot(self):
+            return dict(self.config)
+
+    class Manager:
+        is_running = lambda self: False
+        results = {
+            "items": [
+                {
+                    "id": "a",
+                    "groups": [
+                        {
+                            "qlt": None,
+                            "ptn": None,
+                            "stats": {"median": 1000},
+                            "market": {"p25": 1000, "median": 1000},
+                        }
+                    ],
+                }
+            ]
+        }
+
+    class Catalog:
+        def get(self, item):
+            return {"name": {"ru": "A"}}
+
+    class Client:
+        def __init__(self):
+            self.prices = [900, 700]
+            self.calls = 0
+
+        def get_lots(self, item, **kwargs):
+            unit = self.prices.pop(0)
+            self.calls += 1
+            return {
+                "total": 1,
+                "lots": [
+                    {
+                        "amount": 1,
+                        "buyoutPrice": unit,
+                        "endTime": iso(NOW + timedelta(hours=2 + self.calls)),
+                        "additional": {},
+                    }
+                ],
+            }
+
+    def test_event_after_baseline(self):
+        monitor = FastMonitor(self.Store(), self.Catalog(), self.Manager(), None)
+        with patch("fast_monitor.make_client", return_value=self.Client()):
+            monitor._check()
+            self.assertEqual(monitor.snapshot()["events"], [])
+            monitor._check()
+            events = monitor.snapshot()["events"]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["item"], "a")
+            self.assertEqual(events[0]["unit"], 700)
+            self.assertEqual(events[0]["discount_pct"], 30.0)
+
+    def test_rule_fast_is_sanitized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "config.json")
+            store.update({"item_rules": {"a": {"fast": True}}})
+            self.assertTrue(store.snapshot()["item_rules"]["a"]["fast"])
 
 
 class BarterTests(unittest.TestCase):

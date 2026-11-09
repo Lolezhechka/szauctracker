@@ -28,6 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from barter import BarterBook, calculate_item
+from fast_monitor import FastMonitor
 from catalog import Catalog
 from history_store import HistoryStore
 from market_store import MarketStore
@@ -99,6 +100,7 @@ DEFAULT_CONFIG = {
     "history_pages": 5,
     "discovery_enabled": True,
     "discovery_limit": 10,
+    "fast_interval_sec": 30,
     "group_by_qlt": True,
     "group_by_ptn": True,
     "group_by_stack": True,
@@ -162,6 +164,8 @@ def _clean_rule(rule) -> dict:
     cleaned = {}
     if "enabled" in rule:
         cleaned["enabled"] = bool(rule["enabled"])
+    if "fast" in rule:
+        cleaned["fast"] = bool(rule["fast"])
     for key in ("min_price", "min_profit"):
         if key in rule and rule[key] not in ("", None):
             cleaned[key] = int(_clamp(rule[key], 0, 10**12, 0))
@@ -238,6 +242,7 @@ class Store:
         out["lots_pages"] = int(_clamp(out.get("lots_pages"), 1, 10, 2))
         out["history_pages"] = int(_clamp(out.get("history_pages"), 1, 10, 5))
         out["discovery_limit"] = int(_clamp(out.get("discovery_limit"), 1, 50, 10))
+        out["fast_interval_sec"] = int(_clamp(out.get("fast_interval_sec"), 10, 300, 30))
         out["scan_interval_min"] = int(_clamp(out.get("scan_interval_min"), 1, 180, 5))
         out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 16, 10))
         out["history_ttl_min"] = int(_clamp(out.get("history_ttl_min"), 1, 1440, 30))
@@ -288,6 +293,7 @@ class Store:
                 "history_pages",
                 "discovery_enabled",
                 "discovery_limit",
+                "fast_interval_sec",
                 "scan_interval_min",
                 "scan_workers",
                 "history_ttl_min",
@@ -695,6 +701,8 @@ class AppState:
         self.barter_prices = {}
         self.barter_lock = threading.Lock()
         self.manager = ScanManager(self.store, self.catalog, self.history, self.dead, self.market)
+        self.fast = FastMonitor(self.store, self.catalog, self.manager, CACHE_DIR, log_line)
+        self.fast.start()
         self.stop_event = threading.Event()
 
 
@@ -888,7 +896,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.7"
+    server_version = "SZAUCTRACKER/1.8"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -967,6 +975,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._barter_items()
             elif path == "/api/barter":
                 self._barter(query)
+            elif path == "/api/fast":
+                self._json(200, self.state.fast.snapshot())
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":

@@ -18,6 +18,7 @@ const state = {
   analytics: { item: null, days: 7, variant: null, data: null },
   movement: { item: null, days: 7, data: null },
   barter: { items: null, item: null, data: null, ready: false, error: null },
+  fast: { events: [], seen: null, data: null },
   portfolio: null,
   ruleItem: null,
 };
@@ -292,6 +293,7 @@ async function poll() {
       state.lastRev = status.results_rev;
       await loadResults();
     }
+    await pollFast();
   } catch (error) {
     // Сервер мог перезапускаться — молча ждём следующий тик.
   }
@@ -413,6 +415,7 @@ function renderSettings() {
   form.elements.history_ttl_min.value = cfg.history_ttl_min;
   form.elements.discovery_enabled.checked = cfg.discovery_enabled !== false;
   form.elements.discovery_limit.value = cfg.discovery_limit || 10;
+  form.elements.fast_interval_sec.value = cfg.fast_interval_sec || 30;
 
   $("#secretHint").textContent = cfg.has_secret
     ? "Секрет сохранён. Он не отображается в браузере и не покидает этот компьютер."
@@ -452,6 +455,7 @@ function collectSettings() {
     history_ttl_min: Number(value("history_ttl_min")),
     discovery_enabled: checked("discovery_enabled"),
     discovery_limit: Number(value("discovery_limit")),
+    fast_interval_sec: Number(value("fast_interval_sec")),
   };
 }
 
@@ -1613,6 +1617,49 @@ function bindBarter() {
   refresh.addEventListener("click", loadBarter);
 }
 
+// ------------------------------------------------------------------ быстрый мониторинг
+
+async function pollFast() {
+  try {
+    const data = await api("/api/fast");
+    state.fast.data = data;
+    renderFast(data);
+  } catch (error) {
+    // Сервер мог перезапускаться.
+  }
+}
+
+function renderFast(data) {
+  const feed = $("#fastFeed");
+  if (!feed) return;
+  const events = data.events || [];
+  const first = state.fast.seen === null;
+  if (first) state.fast.seen = new Set(events.map((event) => event.id));
+  for (const event of events) {
+    if (!state.fast.seen.has(event.id)) {
+      state.fast.seen.add(event.id);
+      if (!first) toast(`⚡ ${event.name}: ${moneyFine(event.unit)} · −${pct(event.discount_pct)}`, "warn");
+    }
+  }
+  const enabled = !!data.enabled;
+  if (!enabled && !events.length) {
+    feed.classList.add("hidden");
+    return;
+  }
+  feed.classList.remove("hidden");
+  let status = enabled ? `${data.items.length} предмет(ов) · каждые ${data.interval} с` : "нет предметов";
+  if (data.paused) status = data.paused;
+  if (data.error) status = `ошибка: ${data.error}`;
+  $("#fastStatus").textContent = status;
+  $("#fastEvents").innerHTML = events.slice(0, 5).map((event) => `
+    <div class="fast-event">
+      <b>${esc(event.name)}</b>
+      <span>${moneyFine(event.unit)} · база ${moneyFine(event.benchmark)}</span>
+      <strong>${pct(event.discount_pct)}</strong>
+      <small>${esc(dateTime(event.at))}</small>
+    </div>`).join("");
+}
+
 function bindAnalytics() {
   const itemSelect = $("#analyticsItem");
   const daysSelect = $("#analyticsDays");
@@ -1957,6 +2004,7 @@ function openRuleEditor(itemId) {
   const name = meta ? (meta.name.ru || meta.name.en || itemId) : itemId;
   $("#ruleTitle").textContent = `Правило: ${name}`;
   $("#ruleEnabled").checked = rule.enabled !== false;
+  $("#ruleFast").checked = !!rule.fast;
   $("#ruleMinPrice").value = rule.min_price ?? "";
   $("#ruleMinProfit").value = rule.min_profit ?? "";
   $("#ruleQlt").value = rule.qlt ?? "";
@@ -1970,7 +2018,7 @@ function openRuleEditor(itemId) {
 async function saveRule(clear = false) {
   const item = state.ruleItem;
   if (!item) return;
-  const rule = clear ? {} : { enabled: $("#ruleEnabled").checked };
+  const rule = clear ? {} : { enabled: $("#ruleEnabled").checked, fast: $("#ruleFast").checked };
   if (!clear) {
     const minPrice = $("#ruleMinPrice").value.trim();
     const minProfit = $("#ruleMinProfit").value.trim();
@@ -2022,7 +2070,7 @@ async function renderWatchList() {
     const category = meta ? categoryLabel(categoryOf(meta.category)) : "—";
     const rule = (state.config.item_rules || {})[id] || {};
     const disabled = rule.enabled === false;
-    const ruleTag = Object.keys(rule).length ? `<span class="tag">${disabled ? "выкл" : "правило"}</span>` : "";
+    const ruleTag = `${rule.fast ? '<span class="tag warn">⚡</span>' : ""}${Object.keys(rule).length ? `<span class="tag">${disabled ? "выкл" : "правило"}</span>` : ""}`;
     return `
       <div class="watch-row${disabled ? " disabled" : ""}">
         <div class="grow">

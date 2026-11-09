@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-1.7.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.7/SZAUCTRACKER-Setup-1.7.exe)
+  [SZAUCTRACKER-Setup-1.8.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.8/SZAUCTRACKER-Setup-1.8.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.7/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.8/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 1.7 в свойствах Windows.
+   иконка и версия 1.8 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -190,6 +190,14 @@ Portable-версия ничего не устанавливает: все да�
 * кнопка «＋» добавляет предмет в наблюдение;
 * discovery-предметы не попадают в список наблюдения автоматически.
 
+**Быстрый мониторинг**
+* в правиле предмета включается **⚡ быстрый мониторинг**;
+* до 8 предметов проверяются каждые 30 секунд по 20 самым новым лотам;
+* новые лоты сравниваются с базой последнего полного скана;
+* найденные скидки появляются в ленте «⚡ Быстрый мониторинг» и всплывающем сообщении;
+* во время полного скана мониторинг ждёт, чтобы не тратить лимит API;
+* это локальная лента, без Telegram и внешних уведомлений.
+
 **Бартер**
 * выбор выходного предмета из 514 рецептов;
 * цена продажи — медиана фактических продаж;
@@ -250,6 +258,7 @@ Portable-версия ничего не устанавливает: все да�
 * количество страниц лотов и истории (по 200 записей);
 * сравнение по размеру стека и проценту артефакта;
 * параллельных запросов и интервал обновления истории;
+* ⚡-правило и интервал быстрого мониторинга (10–300 секунд);
 * автоскан и интервал.
 
 ## Лимиты API
@@ -378,9 +387,10 @@ scanner.py          расчёт средней, стаки, группиров�
 history_store.py    локальное накопление продаж в SQLite
 catalog.py          справочник предметов, поиск, категории
 barter.py           бартерный калькулятор и котировки компонентов
+fast_monitor.py     быстрый мониторинг новых лотов
 market_store.py     журнал жизненного цикла лотов (SQLite)
 static/             интерфейс (HTML/CSS/JS без внешних зависимостей)
-tests.py            97 тестов логики
+tests.py            99 тестов логики
 start.bat           запуск из исходников в Windows
 SZAUCTRACKER.spec  конфигурация PyInstaller для пересборки
 make_icon.py        генератор иконки (все размеры ICO, включая 16×16)
@@ -415,7 +425,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-1.7.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-1.8.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты
