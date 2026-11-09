@@ -6,6 +6,7 @@ data/history.db
 data/history.db-wal
 data/history.db-shm
 data/dead_items.json
+data/discovery.json
 data/portfolio.db
 data/market.db
 data/market.db-wal

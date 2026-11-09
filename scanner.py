@@ -1459,6 +1459,9 @@ def scan(
     log=None,
     history_store=None,
     market_store=None,
+    discovery_start: int = 0,
+    discovery_limit: int = 0,
+    dead_ids=None,
 ) -> dict:
     started = time.time()
     now = datetime.now(timezone.utc)
@@ -1486,6 +1489,26 @@ def scan(
     if not watchlist:
         raise ApiError("Все предметы отключены в правилах. Включите хотя бы один.")
 
+    discovery_items: list[str] = []
+    discovery_next = int(discovery_start or 0)
+    if discovery_limit and catalog is not None and getattr(catalog, "ready", False):
+        dead = set(str(x) for x in (dead_ids or []))
+        watch_set = set(watchlist)
+        pool = sorted({
+            str(item["id"])
+            for item in getattr(catalog, "items", []) or []
+            if str(item.get("id") or "") and str(item["id"]) not in watch_set and str(item["id"]) not in dead
+        })
+        if pool:
+            start = discovery_next % len(pool)
+            take = min(max(1, int(discovery_limit)), len(pool))
+            discovery_items = [pool[(start + offset) % len(pool)] for offset in range(take)]
+            discovery_next = (start + take) % len(pool)
+
+    scan_items = [(item, "watch") for item in watchlist] + [(item, "discovery") for item in discovery_items]
+    total = len(scan_items)
+    results_by_index: list[dict | None] = [None] * total
+
     if market_store is not None:
         try:
             market_store.prune(keep_days=30)
@@ -1508,13 +1531,11 @@ def scan(
                     # второй экземпляр приложения. Это не критично.
                     pass
 
-    results_by_index: list[dict | None] = [None] * len(watchlist)
     inserted_total = 0
     done = 0
-    total = len(watchlist)
 
     if workers <= 1 or total <= 1:
-        for index, item_id in enumerate(watchlist):
+        for index, (item_id, source) in enumerate(scan_items):
             if cancel is not None and cancel.is_set():
                 break
             if progress:
@@ -1523,6 +1544,7 @@ def scan(
                 client, catalog, config, item_id, now, cutoff, window_hours, history_store, history_ttl, log,
                 market_store=market_store,
             )
+            result["source"] = source
             results_by_index[index] = result
             inserted_total += inserted
             if progress:
@@ -1544,11 +1566,11 @@ def scan(
                     log,
                     market_store=market_store,
                 ): index
-                for index, item_id in enumerate(watchlist)
+                for index, (item_id, source) in enumerate(scan_items)
             }
             for future in as_completed(futures):
                 index = futures[future]
-                item_id = watchlist[index]
+                item_id, source = scan_items[index]
                 try:
                     result, inserted = future.result()
                 except Exception as exc:
@@ -1558,6 +1580,7 @@ def scan(
                         item_id, _meta_view(catalog, item_id), f"Внутренняя ошибка: {exc}", cutoff, window_hours
                     )
                     inserted = 0
+                result["source"] = source
                 results_by_index[index] = result
                 inserted_total += inserted
                 done += 1
@@ -1569,6 +1592,12 @@ def scan(
     items_out = [result for result in results_by_index if result is not None]
     all_deals = [deal for item in items_out for deal in item.get("deals", [])]
     all_stacks = [stack for item in items_out for stack in item.get("stacks", [])]
+    for item in items_out:
+        source = item.get("source") or "watch"
+        for deal in item.get("deals", []):
+            deal["source"] = source
+        for stack in item.get("stacks", []):
+            stack["source"] = source
     all_deals.sort(key=lambda d: (-d["total_net"], -d["discount_pct"]))
     all_stacks.sort(key=lambda d: (-d["margin_pct"], -d["profit"]))
     limited = [
@@ -1594,6 +1623,10 @@ def scan(
         "rules_skipped": rules_skipped,
         "items_scanned": len([item for item in items_out if item["status"] != "error"]),
         "items_total": total,
+        "watch_items": len(watchlist),
+        "discovery_items": len(discovery_items),
+        "discovery_next": discovery_next,
+        "discovery_deals_count": len([deal for deal in all_deals if deal.get("source") == "discovery"]),
         "items_no_data": len([item for item in items_out if item["status"] in ("no_data", "no_sales")]),
         "items_errors": len([item for item in items_out if item["status"] == "error"]),
         "deals_count": len(all_deals),

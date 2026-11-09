@@ -408,6 +408,8 @@ function renderSettings() {
   form.elements.scan_interval_min.value = cfg.scan_interval_min;
   form.elements.scan_workers.value = cfg.scan_workers;
   form.elements.history_ttl_min.value = cfg.history_ttl_min;
+  form.elements.discovery_enabled.checked = cfg.discovery_enabled !== false;
+  form.elements.discovery_limit.value = cfg.discovery_limit || 10;
 
   $("#secretHint").textContent = cfg.has_secret
     ? "Секрет сохранён. Он не отображается в браузере и не покидает этот компьютер."
@@ -445,6 +447,8 @@ function collectSettings() {
     scan_interval_min: Number(value("scan_interval_min")),
     scan_workers: Number(value("scan_workers")),
     history_ttl_min: Number(value("history_ttl_min")),
+    discovery_enabled: checked("discovery_enabled"),
+    discovery_limit: Number(value("discovery_limit")),
   };
 }
 
@@ -620,6 +624,7 @@ function renderCalcHint() {
     `комиссия <b>${r.commission_pct}%</b> · ` +
     `обновлено ${esc(dateTime(r.generated_at))}` +
     (r.capped_count ? ` · <b>${r.capped_count}</b> лот(ов) с базой по рынку` : "") +
+    (r.discovery_items ? ` · discovery: <b>${r.discovery_items}</b> предмет(ов), <b>${r.discovery_deals_count || 0}</b> сделок` : "") +
     (r.demo ? " · <b>ДЕМО</b>" : "");
 
   const hint = $("#coverageHint");
@@ -679,6 +684,7 @@ function filteredDeals() {
   const maxTime = Number($("#dealMaxTime").value || 0);
   const onlyLiquid = $("#onlyLiquid").checked;
   const budget = Number($("#dealBudget").value || 0);
+  const source = $("#dealSource") ? $("#dealSource").value : "";
   const reliabilityRank = { low: 0, medium: 1, high: 2 };
 
   let rows = (state.results.deals || []).filter((deal) => {
@@ -694,6 +700,7 @@ function filteredDeals() {
     if (minReliability && (reliabilityRank[deal.reliability || "low"] ?? 0) < reliabilityRank[minReliability]) return false;
     if (maxTime && (deal.time_left_min ?? Number.POSITIVE_INFINITY) > maxTime * 60) return false;
     if (budget && (deal.total_cost || 0) > budget) return false;
+    if (source && (deal.source || "watch") !== source) return false;
     if (query) {
       const haystack = [deal.name, deal.item_id, deal.qlt_label, deal.ptn_label, deal.category]
         .filter(Boolean).join(" ").toLowerCase();
@@ -752,6 +759,9 @@ function dealRowHtml(deal, index) {
   if (deal.variant_unknown) {
     tags.push(`<span class="tag warn" title="API не прислал качество/вариант — цена может быть смешана">вариант?</span>`);
   }
+  if ((deal.source || "watch") === "discovery") {
+    tags.push(`<span class="tag discovery" title="Предмет не входит в список наблюдения">вне списка</span>`);
+  }
   for (const flag of deal.restrictions || []) {
     const label = flag === "sell_is_blocked" ? "продажа заблокирована" : "персональный";
     tags.push(`<span class="tag bad" title="Проверьте, можно ли перепродать этот предмет">${esc(label)}</span>`);
@@ -789,7 +799,10 @@ function dealRowHtml(deal, index) {
       <td class="num market" title="Активные лоты того же варианта: минимум–25-й перцентиль">${market}</td>
       <td class="num" title="Продано ${money(deal.volume)} шт. за ${state.results.days} дн. · ~${deal.sales_per_day}/день">${money(deal.volume)}</td>
       <td class="num">${esc(timeLeft(deal.time_left_min))}</td>
-      <td><button type="button" class="btn icon" data-copy="${esc(deal.name)}" title="Скопировать название для поиска в игре">⧉</button></td>
+      <td>
+        <button type="button" class="btn icon" data-copy="${esc(deal.name)}" title="Скопировать название для поиска в игре">⧉</button>
+        ${(deal.source || "watch") === "discovery" ? `<button type="button" class="btn icon" data-watch-add="${esc(deal.item_id)}" title="Добавить в наблюдение">＋</button>` : ""}
+      </td>
     </tr>
     <tr class="details-row hidden" data-d="${index}">
       <td colspan="13">
@@ -892,7 +905,7 @@ function renderNoDeals() {
 }
 
 function bindDealsControls() {
-  for (const id of ["dealSearch", "dealCategory", "dealMinDiscount", "dealMinProfit", "dealMinPrice", "dealMaxLots", "dealMinQlt", "dealMinPercent", "dealBonus", "dealMinReliability", "dealMaxTime", "dealBudget", "dealSort", "onlyLiquid"]) {
+  for (const id of ["dealSearch", "dealCategory", "dealMinDiscount", "dealMinProfit", "dealMinPrice", "dealMaxLots", "dealMinQlt", "dealMinPercent", "dealBonus", "dealMinReliability", "dealMaxTime", "dealBudget", "dealSource", "dealSort", "onlyLiquid"]) {
     const element = document.getElementById(id);
     if (element) element.addEventListener(id === "dealSearch" || id === "dealBudget" ? "input" : "change", renderDeals);
   }
@@ -913,6 +926,12 @@ function bindDealsControls() {
     if (copyButton) {
       event.stopPropagation();
       await copyToClipboard(copyButton.getAttribute("data-copy"));
+      return;
+    }
+    const addButton = event.target.closest("[data-watch-add]");
+    if (addButton) {
+      event.stopPropagation();
+      await watchAction({ add: [addButton.getAttribute("data-watch-add")] });
       return;
     }
     const row = event.target.closest("tr.deal-row");

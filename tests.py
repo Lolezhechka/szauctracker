@@ -231,11 +231,14 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.snapshot()["history_pages"], 5)
             self.assertTrue(store.snapshot()["group_by_stack"])
             self.assertTrue(store.snapshot()["group_by_percent"])
-            store.update({"scan_workers": 99, "history_ttl_min": 0, "history_pages": 99, "lots_pages": 0})
+            self.assertTrue(store.snapshot()["discovery_enabled"])
+            self.assertEqual(store.snapshot()["discovery_limit"], 10)
+            store.update({"scan_workers": 99, "history_ttl_min": 0, "history_pages": 99, "lots_pages": 0, "discovery_limit": 99})
             self.assertEqual(store.snapshot()["scan_workers"], 16)
             self.assertEqual(store.snapshot()["history_ttl_min"], 1)
             self.assertEqual(store.snapshot()["history_pages"], 10)
             self.assertEqual(store.snapshot()["lots_pages"], 1)
+            self.assertEqual(store.snapshot()["discovery_limit"], 50)
 
     def test_cap_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -817,6 +820,36 @@ class ScanIntegrationTests(unittest.TestCase):
                 self.assertTrue(results["items"][2]["history_skipped"])
             finally:
                 history.close()
+
+
+class DiscoveryScanTests(unittest.TestCase):
+    def test_discovery_scans_items_outside_watchlist_and_advances_cursor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = Catalog(Path(tmp) / "catalog.json")
+            catalog._install(
+                [
+                    {"id": "a", "category": "other", "name": {"ru": "A"}},
+                    {"id": "b", "category": "other", "name": {"ru": "B"}},
+                    {"id": "c", "category": "other", "name": {"ru": "C"}},
+                    {"id": "d", "category": "other", "name": {"ru": "D"}},
+                ]
+            )
+            client = FakeClient()
+            results = scan(
+                client, catalog,
+                cfg(watchlist=["a"], scan_workers=2, min_profit=0),
+                discovery_start=0,
+                discovery_limit=2,
+                dead_ids=["c"],
+            )
+            self.assertEqual(results["watch_items"], 1)
+            self.assertEqual(results["discovery_items"], 2)
+            self.assertEqual([item["id"] for item in results["items"]], ["a", "b", "d"])
+            self.assertEqual(results["discovery_next"], 0)
+            self.assertEqual(results["items"][0]["source"], "watch")
+            self.assertEqual(results["items"][1]["source"], "discovery")
+            self.assertEqual(results["discovery_deals_count"], 2)
+            self.assertTrue(all(deal["source"] == "discovery" for deal in results["deals"] if deal["item_id"] != "a"))
 
 
 class CompactResultsTests(unittest.TestCase):

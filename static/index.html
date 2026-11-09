@@ -109,6 +109,11 @@
       <option value="time">Сначала истекающие</option>
       <option value="volume">Сначала ликвидные</option>
     </select>
+    <select id="dealSource" class="input select">
+      <option value="">Все источники</option>
+      <option value="watch">Наблюдение</option>
+      <option value="discovery">Вне списка</option>
+    </select>
     <label class="check"><input type="checkbox" id="onlyLiquid"> только ликвидные</label>
     <a id="csvLink" class="btn ghost hidden" href="/api/export.csv">CSV</a>
   </div>
@@ -557,6 +562,14 @@
         <label>Обновлять историю, мин
           <input name="history_ttl_min" class="input" type="number" min="1" max="1440" step="1">
           <span class="field-hint">лоты обновляются каждый скан, история — реже; база всё равно ограничивается текущим рынком</span>
+        </label>
+        <label class="toggle-line">Discovery: искать вне списка
+          <input name="discovery_enabled" type="checkbox" class="switch">
+          <span class="switch-ui"></span>
+        </label>
+        <label>Предметов discovery за скан
+          <input name="discovery_limit" class="input" type="number" min="1" max="50" step="1">
+          <span class="field-hint">не добавляются в наблюдение; сделки помечаются «вне списка»</span>
         </label>
       </div>
       <p class="hint">Лимит API — 400 токенов/мин, один запрос аукциона стоит 2 токена. Приложение само выдерживает темп (~190 запросов/мин), запрашивает предметы параллельно и не тратит запрос истории на предметы без лотов.</p>

@@ -53,6 +53,7 @@ HISTORY_PATH = DATA_DIR / "history.db"
 DEAD_PATH = DATA_DIR / "dead_items.json"
 PORTFOLIO_PATH = DATA_DIR / "portfolio.db"
 MARKET_PATH = DATA_DIR / "market.db"
+DISCOVERY_PATH = DATA_DIR / "discovery.json"
 CACHE_DIR = DATA_DIR / "cache"
 LOG_PATH = DATA_DIR / "app.log"
 BUNDLED_CATALOG = RESOURCE_DIR / "data" / "catalog.json"
@@ -94,6 +95,8 @@ DEFAULT_CONFIG = {
     "min_profit": 5000,
     "lots_pages": 2,
     "history_pages": 5,
+    "discovery_enabled": True,
+    "discovery_limit": 10,
     "group_by_qlt": True,
     "group_by_ptn": True,
     "group_by_stack": True,
@@ -232,6 +235,7 @@ class Store:
         out["min_profit"] = int(_clamp(out.get("min_profit"), 0, 10**12, 5000))
         out["lots_pages"] = int(_clamp(out.get("lots_pages"), 1, 10, 2))
         out["history_pages"] = int(_clamp(out.get("history_pages"), 1, 10, 5))
+        out["discovery_limit"] = int(_clamp(out.get("discovery_limit"), 1, 50, 10))
         out["scan_interval_min"] = int(_clamp(out.get("scan_interval_min"), 1, 180, 5))
         out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 16, 10))
         out["history_ttl_min"] = int(_clamp(out.get("history_ttl_min"), 1, 1440, 30))
@@ -241,7 +245,7 @@ class Store:
         out["cap_by_market"] = bool(out.get("cap_by_market", True))
         out["client_id"] = str(out.get("client_id") or "").strip()[:64]
         out["client_secret"] = str(out.get("client_secret") or "").strip()[:256]
-        for key in ("demo", "auto_scan", "group_by_qlt", "group_by_ptn", "group_by_stack", "group_by_percent"):
+        for key in ("demo", "auto_scan", "discovery_enabled", "group_by_qlt", "group_by_ptn", "group_by_stack", "group_by_percent"):
             out[key] = bool(out.get(key))
         out["watchlist"] = _clean_watchlist(out.get("watchlist"))
         out["item_rules"] = _clean_item_rules(out.get("item_rules"))
@@ -280,6 +284,8 @@ class Store:
                 "min_profit",
                 "lots_pages",
                 "history_pages",
+                "discovery_enabled",
+                "discovery_limit",
                 "scan_interval_min",
                 "scan_workers",
                 "history_ttl_min",
@@ -441,6 +447,7 @@ class ScanManager:
         self.done = 0
         self.total = 0
         self.current = None
+        self.discovery_cursor = self._load_discovery_cursor()
         self.results = self._load_results()
         if self.dead_list is not None:
             invalid = [
@@ -452,6 +459,24 @@ class ScanManager:
                 self.dead_list.add(invalid)
 
     # ------------------------------------------------------------- состояние
+
+    def _load_discovery_cursor(self) -> int:
+        try:
+            with open(DISCOVERY_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return max(0, int(data.get("cursor") or 0))
+        except (OSError, ValueError, TypeError):
+            return 0
+
+    def _save_discovery_cursor(self) -> None:
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = DISCOVERY_PATH.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"cursor": int(self.discovery_cursor)}, fh)
+            tmp.replace(DISCOVERY_PATH)
+        except OSError:
+            pass
 
     def _load_results(self) -> dict:
         try:
@@ -576,6 +601,12 @@ class ScanManager:
                 log=log_line,
                 history_store=self.history_store,
                 market_store=self.market_store,
+                discovery_start=self.discovery_cursor,
+                discovery_limit=(
+                    int(config.get("discovery_limit", 10))
+                    if config.get("discovery_enabled", True) else 0
+                ),
+                dead_ids=self.dead_list.ids() if self.dead_list is not None else [],
             )
             invalid = [
                 item["id"]
@@ -586,6 +617,8 @@ class ScanManager:
                 self.dead_list.add(invalid)
             results["dead_skipped"] = self.dead_skipped
             results["invalid_items"] = invalid
+            self.discovery_cursor = int(results.get("discovery_next") or self.discovery_cursor)
+            self._save_discovery_cursor()
             self.results = results
             self._save_results(results)
             self.phase = "готово"
@@ -693,6 +726,7 @@ def _compact_results(results: dict) -> dict:
                 "name": item.get("name"),
                 "category": item.get("category"),
                 "status": item.get("status"),
+                "source": item.get("source"),
                 "error": item.get("error"),
                 "lots_total": item.get("lots_total"),
                 "history_in_window": item.get("history_in_window"),
@@ -848,7 +882,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.5"
+    server_version = "SZAUCTRACKER/1.6"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
