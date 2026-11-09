@@ -2,6 +2,7 @@
 data/config.json
 data/last_results.json
 data/cache/
+data/icons/
 data/history.db
 data/history.db-wal
 data/history.db-shm

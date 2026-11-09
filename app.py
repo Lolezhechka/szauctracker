@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,6 +57,7 @@ DEAD_PATH = DATA_DIR / "dead_items.json"
 PORTFOLIO_PATH = DATA_DIR / "portfolio.db"
 MARKET_PATH = DATA_DIR / "market.db"
 BARTER_PATH = DATA_DIR / "barter_recipes.json"
+ICONS_DIR = DATA_DIR / "icons"
 DISCOVERY_PATH = DATA_DIR / "discovery.json"
 CACHE_DIR = DATA_DIR / "cache"
 LOG_PATH = DATA_DIR / "app.log"
@@ -895,8 +897,29 @@ def _csv_stacks_bytes(results: dict) -> bytes:
     return buffer.getvalue().encode("utf-8-sig")
 
 
+def _icon_category(category: str) -> str:
+    category = str(category or "other")
+    if category == "containers":
+        return "backpacks"
+    if category.startswith("consumables/"):
+        sub = category.split("/", 1)[1]
+        return "bullet" if sub == "bullet" else f"supply/{sub}"
+    if category == "consumables":
+        return "supply"
+    return category
+
+
+def _icon_candidates(item: str, category: str) -> list[str]:
+    mapped = _icon_category(category)
+    candidates = [f"{mapped}/{item}.png", f"other/{item}.png"]
+    if mapped != "supply":
+        candidates.append(f"supply/{item}.png")
+    candidates.append(f"backpacks/{item}.png")
+    return list(dict.fromkeys(candidates))
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.8"
+    server_version = "SZAUCTRACKER/1.9"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -977,6 +1000,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._barter(query)
             elif path == "/api/fast":
                 self._json(200, self.state.fast.snapshot())
+            elif path == "/api/icon":
+                self._icon(query)
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":
@@ -1153,6 +1178,50 @@ class Handler(BaseHTTPRequestHandler):
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _icon(self, query) -> None:
+        item = (query.get("item") or [""])[0].strip()
+        if not ITEM_ID_RE.match(item):
+            self._error(400, "Некорректный ID предмета")
+            return
+        cache_path = ICONS_DIR / f"{item}.png"
+        try:
+            if cache_path.exists() and cache_path.stat().st_size > 0:
+                data = cache_path.read_bytes()
+                self._png(data)
+                return
+        except OSError:
+            pass
+        meta = self.state.catalog.get(item) or {}
+        for candidate in _icon_candidates(item, meta.get("category", "other")):
+            url = (
+                "https://raw.githubusercontent.com/EXBO-Studio/stalzone-database/"
+                f"main/global/icons/{candidate}"
+            )
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/1.9"})
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    data = resp.read()
+                if not data:
+                    continue
+                ICONS_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path.with_suffix(".tmp")
+                tmp.write_bytes(data)
+                tmp.replace(cache_path)
+                self._png(data)
+                return
+            except Exception as exc:
+                log_line(f"Иконка {item}: {type(exc).__name__}: {exc}")
+                continue
+        self._error(404, "Иконка не найдена")
+
+    def _png(self, data: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Cache-Control", "public, max-age=604800")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _movement(self, query) -> None:
         item = (query.get("item") or [""])[0].strip()

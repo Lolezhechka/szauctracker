@@ -792,8 +792,13 @@ function dealRowHtml(deal, index) {
   return `
     <tr class="deal-row" data-i="${index}">
       <td>
-        <div class="item-name">${esc(deal.name)}</div>
-        <div class="item-meta">${esc(deal.item_id)} · ${esc(categoryLabel(categoryOf(deal.category)))}</div>
+        <div class="item-line">
+          <img class="item-icon" loading="lazy" src="/api/icon?item=${encodeURIComponent(deal.item_id)}" alt="" onerror="this.classList.add('missing')">
+          <div>
+            <div class="item-name">${esc(deal.name)}</div>
+            <div class="item-meta">${esc(deal.item_id)} · ${esc(categoryLabel(categoryOf(deal.category)))}</div>
+          </div>
+        </div>
       </td>
       <td>${tags.join(" ") || '<span class="muted">—</span>'}</td>
       <td class="num price">${moneyFine(deal.unit_price)}</td>
@@ -901,7 +906,7 @@ function renderNoDeals() {
     const statusText = item.status === "error" ? (item.error || "ошибка") : (STATUS_LABELS[item.status] || item.status);
     return `
       <tr>
-        <td><div class="item-name">${esc(item.name)}</div><div class="item-meta">${esc(item.id)} · ${esc(categoryLabel(categoryOf(item.category)))}</div></td>
+        <td><div class="item-line"><img class="item-icon" loading="lazy" src="/api/icon?item=${encodeURIComponent(item.id)}" alt="" onerror="this.classList.add('missing')"><div><div class="item-name">${esc(item.name)}</div><div class="item-meta">${esc(item.id)} · ${esc(categoryLabel(categoryOf(item.category)))}</div></div></div></td>
         <td><span class="status-label status-${esc(item.status)}">${esc(statusText)}</span></td>
         <td class="num">${money(item.lots_total)}</td>
         <td class="num">${money(volume)}</td>
@@ -2074,8 +2079,13 @@ async function renderWatchList() {
     return `
       <div class="watch-row${disabled ? " disabled" : ""}">
         <div class="grow">
-          <div class="name">${esc(name)}</div>
-          <div class="sub">${esc(id)} · ${esc(category)}</div>
+          <div class="item-line">
+            <img class="item-icon" loading="lazy" src="/api/icon?item=${encodeURIComponent(id)}" alt="" onerror="this.classList.add('missing')">
+            <div>
+              <div class="name">${esc(name)}</div>
+              <div class="sub">${esc(id)} · ${esc(category)}</div>
+            </div>
+          </div>
         </div>
         ${ruleTag}
         <button type="button" class="btn icon" data-rule="${esc(id)}" title="Правило предмета">⚙</button>
