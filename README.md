@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-1.3.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.3/SZAUCTRACKER-Setup-1.3.exe)
+  [SZAUCTRACKER-Setup-1.4.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.4/SZAUCTRACKER-Setup-1.4.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.3/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.4/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 1.3 в свойствах Windows.
+   иконка и версия 1.4 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -183,6 +183,13 @@ Portable-версия ничего не устанавливает: все да�
 * **CSV** — выгрузка для Excel (разделитель `;`, UTF-8 BOM);
 * ниже — предметы без выгодных лотов, чтобы видеть, что скан реально работает.
 
+**Движение**
+* журнал активных лотов между сканами: появление, изменение цены, исчезновение;
+* «вероятно продан» сопоставляется с продажами по количеству, цене и времени;
+* «истёк» — лот исчез после endTime, «пропал» — до endTime без найденной продажи;
+* активный запас, медиана рынка, sell-through, доля вероятных продаж и наблюдаемое время жизни;
+* график событий по дням и журнал последних переходов.
+
 **Аналитика**
 * выбор предмета из наблюдения, периода 2/7/30/90 дней и варианта (качество + паттерн);
 * график медианы продаж, полосы 25–75 перцентилей и объёма по дням;
@@ -271,6 +278,7 @@ Portable-версия ничего не устанавливает: все да�
 * первый скан с добором истории — около **3,5 минут**, 478 запросов;
 * повторный скан с прогретой историей — около **1,5–2 минут**, ~260 запросов;
 * замер с адаптивной базой: 250 предметов, 263 запроса, 7 сделок, ~106 секунд;
+* журнал движения лотов пишется в `data/market.db` без дополнительных запросов к API;
 * на первом скане история популярных предметов может занимать 5 страниц; на повторных
   она берётся из локальной базы и кэша;
 * 50 предметов — около 20–30 секунд.
@@ -309,6 +317,7 @@ python app.py --once --items 04yr,1kdg,g34p
 | `data/config.json` | настройки и **Client-Secret в открытом виде** |
 | `data/history.db` | накопленная локальная история продаж (SQLite, хранится 7 дней) |
 | `data/portfolio.db` | портфель: покупки, продажи, P&L (SQLite) |
+| `data/market.db` | журнал движения лотов: появления, изменения цены, вероятные продажи, истечения (SQLite) |
 | `data/dead_items.json` | ID, которые API считает недействительными (пропускаются 7 дней) |
 | `data/cache/*.json` | кэш ответов API (чистится от файлов старше 7 дней и старше 50 МБ) |
 | `data/last_results.json` | последний результат скана |
@@ -351,8 +360,9 @@ stalzone.py         клиент eAPI: авторизация, rate limit, кэ�
 scanner.py          расчёт средней, стаки, группировка, поиск сделок
 history_store.py    локальное накопление продаж в SQLite
 catalog.py          справочник предметов, поиск, категории
+market_store.py     журнал жизненного цикла лотов (SQLite)
 static/             интерфейс (HTML/CSS/JS без внешних зависимостей)
-tests.py            92 тестов логики
+tests.py            94 тестов логики
 start.bat           запуск из исходников в Windows
 SZAUCTRACKER.spec  конфигурация PyInstaller для пересборки
 make_icon.py        генератор иконки (все размеры ICO, включая 16×16)
@@ -387,7 +397,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-1.3.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-1.4.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты

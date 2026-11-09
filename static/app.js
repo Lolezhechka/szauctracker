@@ -16,6 +16,7 @@ const state = {
   searchTimer: null,
   deadItems: [],
   analytics: { item: null, days: 7, variant: null, data: null },
+  movement: { item: null, days: 7, data: null },
   portfolio: null,
   ruleItem: null,
 };
@@ -194,12 +195,14 @@ function bindTabs() {
   $$(".tab").forEach((tab) => tab.addEventListener("click", () => {
     switchTab(tab.dataset.tab);
     if (tab.dataset.tab === "analytics") ensureAnalytics();
+    if (tab.dataset.tab === "movement") ensureMovement();
     if (tab.dataset.tab === "portfolio") ensurePortfolio();
   }));
   const initial = location.hash.replace("#", "");
-  if (["deals", "stacks", "analytics", "portfolio", "watch", "settings"].includes(initial)) {
+  if (["deals", "stacks", "analytics", "movement", "portfolio", "watch", "settings"].includes(initial)) {
     switchTab(initial);
     if (initial === "analytics") ensureAnalytics();
+    if (initial === "movement") ensureMovement();
     if (initial === "portfolio") ensurePortfolio();
   }
 }
@@ -1345,6 +1348,143 @@ async function openAnalytics(item, qlt, ptn) {
   await loadAnalytics();
 }
 
+// ------------------------------------------------------------------ движение
+
+const MOVEMENT_LABELS = {
+  appeared: "Появился",
+  price: "Цена изменилась",
+  probable_sold: "Вероятно продан",
+  expired: "Истёк",
+  missing: "Пропал",
+  reappeared: "Снова появился",
+};
+
+async function renderMovementItems() {
+  const select = $("#movementItem");
+  if (!select) return;
+  const watch = (state.config && state.config.watchlist) || [];
+  if (!watch.length) {
+    select.innerHTML = `<option value="">Нет предметов</option>`;
+    return;
+  }
+  await resolveWatchMeta();
+  const current = select.value || state.movement.item;
+  select.innerHTML = watch.map((id) => {
+    const meta = state.itemMeta[id];
+    const name = meta ? (meta.name.ru || meta.name.en || id) : id;
+    return `<option value="${esc(id)}">${esc(name)} (${esc(id)})</option>`;
+  }).join("");
+  const chosen = watch.includes(current) ? current : watch[0];
+  state.movement.item = chosen;
+  select.value = chosen;
+}
+
+function movementChartHtml(data) {
+  const series = data.series || [];
+  if (!series.length) return `<div class="empty">Событий за период нет.</div>`;
+  const width = Math.max(520, 720);
+  const height = 250;
+  const m = { l: 48, r: 16, t: 16, b: 34 };
+  const w = width - m.l - m.r;
+  const h = height - m.t - m.b;
+  const keys = ["appeared", "probable_sold", "expired", "missing"];
+  const colors = { appeared: "#a8e05f", probable_sold: "#6fb6d8", expired: "#e8a94a", missing: "#e2675a" };
+  const maxValue = Math.max(1, ...series.flatMap((p) => keys.map((k) => p[k] || 0)));
+  const n = series.length;
+  const groupW = w / Math.max(1, n);
+  const barW = Math.max(2, Math.min(10, groupW / 6));
+  const bars = series.map((p, i) => {
+    const x0 = m.l + i * groupW + groupW / 2 - barW * 2;
+    return keys.map((key, k) => {
+      const value = p[key] || 0;
+      const bh = (value / maxValue) * h;
+      return `<rect x="${(x0 + k * barW).toFixed(1)}" y="${(m.t + h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${colors[key]}"><title>${esc(p.date)} · ${MOVEMENT_LABELS[key]}: ${value}</title></rect>`;
+    }).join("");
+  }).join("");
+  const grid = [0, 1, 2, 3, 4].map((k) => {
+    const value = (maxValue * k) / 4;
+    const y = m.t + h - (value / maxValue) * h;
+    return `<line x1="${m.l}" x2="${m.l + w}" y1="${y}" y2="${y}" stroke="#1b2620"/><text x="${m.l - 8}" y="${y + 4}" text-anchor="end" fill="#64786b" font-size="10" font-family="monospace">${Math.round(value)}</text>`;
+  }).join("");
+  const ticks = [0, Math.floor((n - 1) / 3), Math.floor(((n - 1) * 2) / 3), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+  const labels = ticks.map((i) => `<text x="${(m.l + i * groupW + groupW / 2).toFixed(1)}" y="${height - 12}" text-anchor="middle" fill="#64786b" font-size="10" font-family="monospace">${esc(String(series[i].date).slice(5))}</text>`).join("");
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="События лотов"><title>События лотов по дням</title>${grid}${bars}${labels}</svg>`;
+}
+
+function renderMovement(data) {
+  const summary = data || {};
+  const events = summary.events || {};
+  const sold = events.probable_sold || 0;
+  $("#mvLots").textContent = money(summary.supply_lots || 0);
+  $("#mvUnits").textContent = `${money(summary.supply_units || 0)} шт. в продаже`;
+  $("#mvMedian").textContent = moneyFine(summary.median_ask);
+  $("#mvSold").textContent = money(sold);
+  $("#mvSoldSub").textContent = summary.probable_sold_pct != null
+    ? `${summary.probable_sold_pct}% от исчезнувших`
+    : "пока нет исчезновений";
+  $("#mvLifetime").textContent = summary.avg_lifetime_hours != null ? `${summary.avg_lifetime_hours} ч` : "—";
+  const range = $("#movementRange");
+  if (range) range.textContent = `${summary.name || summary.item || ""} · ${summary.days || 0} дн.`;
+  $("#movementChart").innerHTML = movementChartHtml(summary);
+  const stat = (label, value) => `<div class="analytics-stat"><span>${esc(label)}</span><b>${value}</b></div>`;
+  $("#movementStats").innerHTML = `<div class="analytics-stats">
+    ${stat("Появилось", money(events.appeared || 0))}
+    ${stat("Сменили цену", money(events.price || 0))}
+    ${stat("Вероятно продано", money(sold))}
+    ${stat("Истекло", money(events.expired || 0))}
+    ${stat("Пропало", money(events.missing || 0))}
+    ${stat("Закрыто наблюдений", money(summary.closed || 0))}
+    ${stat("Исчезло всего", money(summary.disappeared || 0))}
+    ${stat("Доля вероятных продаж", summary.probable_sold_pct != null ? `${summary.probable_sold_pct}%` : "—")}
+  </div>`;
+  const recent = summary.recent || [];
+  $("#movementEventsCount").textContent = recent.length ? `${recent.length} событий` : "";
+  $("#movementEmpty").classList.toggle("hidden", recent.length > 0 || (summary.supply_lots || 0) > 0);
+  $("#movementEvents").innerHTML = recent.map((event) => {
+    const detail = event.detail || {};
+    let text = "";
+    if (event.event === "price") text = `${moneyFine(detail.old)} → ${moneyFine(detail.new)}`;
+    else if (event.event === "probable_sold") text = `продажа ${moneyFine(detail.sale_price)} · ${dateTime(detail.sale_time)}`;
+    else if (event.event === "expired") text = `endTime ${dateTime(detail.end_time)}`;
+    const variant = `${event.qlt != null ? QUALITY_NAMES[event.qlt] || `q${event.qlt}` : "—"}${event.ptn != null ? ` · +${event.ptn}` : ""}`;
+    return `<tr><td>${esc(dateTime(event.at))}</td><td>${esc(MOVEMENT_LABELS[event.event] || event.event)}</td><td class="num">${money(event.amount)}</td><td class="num">${moneyFine(event.unit)}</td><td>${esc(variant)}</td><td class="muted">${esc(text)}</td></tr>`;
+  }).join("");
+}
+
+async function loadMovement() {
+  const item = $("#movementItem") ? $("#movementItem").value : "";
+  if (!item) return;
+  state.movement.item = item;
+  state.movement.days = Number($("#movementDays").value || 7);
+  try {
+    const data = await api(`/api/movement?item=${encodeURIComponent(item)}&days=${state.movement.days}`);
+    state.movement.data = data;
+    renderMovement(data);
+  } catch (error) {
+    $("#movementChart").innerHTML = `<div class="empty">Не удалось загрузить: ${esc(error.message)}</div>`;
+    $("#movementStats").innerHTML = "";
+    $("#movementEvents").innerHTML = "";
+  }
+}
+
+async function ensureMovement() {
+  if (!$("#movementItem") || !$("#movementItem").options.length) await renderMovementItems();
+  if (!state.movement.item) state.movement.item = ((state.config && state.config.watchlist) || [])[0] || null;
+  if (!state.movement.item) return;
+  const select = $("#movementItem");
+  if (select && [...select.options].some((option) => option.value === state.movement.item)) select.value = state.movement.item;
+  await loadMovement();
+}
+
+function bindMovement() {
+  const itemSelect = $("#movementItem");
+  const daysSelect = $("#movementDays");
+  if (!itemSelect || !daysSelect) return;
+  itemSelect.addEventListener("change", loadMovement);
+  daysSelect.addEventListener("change", loadMovement);
+  $("#movementRefresh").addEventListener("click", loadMovement);
+}
+
 function bindAnalytics() {
   const itemSelect = $("#analyticsItem");
   const daysSelect = $("#analyticsDays");
@@ -1786,6 +1926,7 @@ async function init() {
   bindDealsControls();
   bindStacks();
   bindAnalytics();
+  bindMovement();
   bindPortfolio();
   bindRuleEditor();
   bindWatch();
@@ -1795,6 +1936,8 @@ async function init() {
   try {
     await loadConfig();
     await renderAnalyticsItems();
+    await renderMovementItems();
+    if (location.hash === "#movement") await ensureMovement();
     await poll();
     await loadResults();
     await loadCatalog();

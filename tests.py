@@ -12,6 +12,7 @@ from pathlib import Path
 
 from catalog import Catalog
 from history_store import HistoryStore
+from market_store import MarketStore
 from portfolio import PortfolioStore
 from stalzone import BASE_DEMO, BASE_PROD, DiskCache
 from scanner import analyze_item, artifact_percent, compute_stats, fetch_history, group_key, percent_band, scan, stack_band
@@ -1099,6 +1100,74 @@ class HistoryPaginationTests(unittest.TestCase):
         )
         self.assertEqual(len(prices), 2)
         self.assertEqual(len(client.calls), 2)
+
+
+class MarketStoreTests(unittest.TestCase):
+    def make_lot(self, unit=1000, amount=1, end_hours=2, qlt=2, ptn=15, end_time=None):
+        now = datetime.now(timezone.utc)
+        return {
+            "amount": amount,
+            "buyoutPrice": unit * amount,
+            "currentPrice": 0,
+            "startPrice": unit * amount,
+            "startTime": iso(now - timedelta(hours=1)),
+            "endTime": end_time or iso(now + timedelta(hours=end_hours)),
+            "additional": {"qlt": qlt, "ptn": ptn, "spawn_time": 123},
+        }
+
+    def test_lifecycle_sold_expired_missing_and_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MarketStore(Path(tmp) / "market.db")
+            now = datetime.now(timezone.utc)
+            lot = self.make_lot(unit=1000)
+            self.assertEqual(store.observe("item", [lot], now=now)["appeared"], 1)
+            self.assertEqual(store.observe("item", [lot], now=now + timedelta(minutes=1))["appeared"], 0)
+            self.assertEqual(store.summary("item", 7)["supply_lots"], 1)
+
+            lot2 = dict(lot)
+            lot2["buyoutPrice"] = 900
+            self.assertEqual(store.observe("item", [lot2], now=now + timedelta(minutes=2))["price"], 1)
+
+            sale = {
+                "amount": 1,
+                "price": 900,
+                "time": iso(now + timedelta(minutes=2, seconds=30)),
+                "additional": {"qlt": 2, "ptn": 15},
+            }
+            counts = store.observe("item", [], now=now + timedelta(minutes=3), sales=[sale])
+            self.assertEqual(counts["probable_sold"], 1)
+            summary = store.summary("item", 7)
+            self.assertEqual(summary["supply_lots"], 0)
+            self.assertEqual(summary["events"].get("probable_sold"), 1)
+            self.assertGreater(summary["avg_lifetime_hours"], 0)
+
+            expired = self.make_lot(unit=700, end_time=iso(now - timedelta(hours=1)))
+            store.observe("item2", [expired], now=now)
+            counts = store.observe("item2", [], now=now + timedelta(minutes=1))
+            self.assertEqual(counts["expired"], 1)
+            self.assertEqual(store.summary("item2", 7)["events"].get("expired"), 1)
+
+            missing = self.make_lot(unit=500)
+            store.observe("item3", [missing], now=now)
+            counts = store.observe("item3", [], now=now + timedelta(minutes=1))
+            self.assertEqual(counts["missing"], 1)
+
+            incomplete = self.make_lot(unit=300)
+            store.observe("item4", [incomplete], now=now)
+            counts = store.observe("item4", [], now=now + timedelta(minutes=1), complete=False)
+            self.assertEqual(counts["missing"], 0)
+            self.assertEqual(store.summary("item4", 7)["supply_lots"], 1)
+            store.close()
+
+    def test_prune_and_duplicate_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MarketStore(Path(tmp) / "market.db")
+            now = datetime.now(timezone.utc)
+            lot = self.make_lot(unit=1000)
+            counts = store.observe("item", [lot, dict(lot)], now=now)
+            self.assertEqual(counts["appeared"], 2)
+            self.assertEqual(store.total("item"), 2)
+            store.close()
 
 
 class CacheEvictionTests(unittest.TestCase):

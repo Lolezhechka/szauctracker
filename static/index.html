@@ -29,6 +29,7 @@
   <button class="tab active" data-tab="deals">Сделки <span id="dealsBadge" class="badge">0</span></button>
   <button class="tab" data-tab="stacks">Стаки <span id="stacksBadge" class="badge muted">0</span></button>
   <button class="tab" data-tab="analytics">Аналитика</button>
+  <button class="tab" data-tab="movement">Движение</button>
   <button class="tab" data-tab="portfolio">Портфель</button>
   <button class="tab" data-tab="watch">Наблюдение <span id="watchBadge" class="badge">0</span></button>
   <button class="tab" data-tab="settings">Настройки</button>
@@ -281,6 +282,50 @@
         <tbody id="analyticsRecent"></tbody>
       </table>
     </div>
+  </div>
+</section>
+
+<!-- ============================ ДВИЖЕНИЕ ============================ -->
+<section id="tab-movement" class="tab-panel">
+  <div class="toolbar">
+    <select id="movementItem" class="input select"></select>
+    <select id="movementDays" class="input select">
+      <option value="1">24 часа</option>
+      <option value="7" selected>7 дней</option>
+      <option value="30">30 дней</option>
+      <option value="90">90 дней</option>
+    </select>
+    <button type="button" id="movementRefresh" class="btn">Обновить</button>
+  </div>
+
+  <div class="summary">
+    <div class="stat"><span class="stat-label">Активных лотов</span><strong id="mvLots">—</strong><span class="stat-sub" id="mvUnits">—</span></div>
+    <div class="stat"><span class="stat-label">Медиана рынка</span><strong id="mvMedian">—</strong><span class="stat-sub">по активным лотам</span></div>
+    <div class="stat accent"><span class="stat-label">Вероятно продано</span><strong id="mvSold">—</strong><span class="stat-sub" id="mvSoldSub">—</span></div>
+    <div class="stat"><span class="stat-label">Среднее время лота</span><strong id="mvLifetime">—</strong><span class="stat-sub">наблюдаемое</span></div>
+  </div>
+
+  <div class="analytics-grid">
+    <div class="panel chart-panel">
+      <div class="panel-head"><h2>События по дням</h2><span id="movementRange" class="muted"></span></div>
+      <div id="movementChart" class="chart"></div>
+      <p class="hint">Появившиеся лоты, исчезнувшие и вероятно проданные. «Пропал» — исчез до endTime без найденной продажи.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Сводка</h2></div>
+      <div id="movementStats"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Последние события</h2><span id="movementEventsCount" class="muted"></span></div>
+    <div class="table-wrap">
+      <table class="table compact">
+        <thead><tr><th>Время</th><th>Событие</th><th class="num">Кол-во</th><th class="num">Цена / шт.</th><th>Вариант</th><th>Детали</th></tr></thead>
+        <tbody id="movementEvents"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="movementEmpty">Нет накопленных наблюдений. Оставьте приложение запущенным — журнал заполнится при следующих сканах.</div>
   </div>
 </section>
 

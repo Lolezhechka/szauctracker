@@ -1354,6 +1354,7 @@ def _scan_one(
     history_store,
     history_ttl: float,
     log,
+    market_store=None,
 ) -> tuple[dict, int]:
     meta_view = _meta_view(catalog, item_id)
     try:
@@ -1400,6 +1401,18 @@ def _scan_one(
                 history = fetched
 
         coverage = build_coverage(history, cutoff, window_hours, raw_sample, source)
+        if market_store is not None:
+            try:
+                market_store.observe(
+                    item_id,
+                    lots,
+                    now=now,
+                    complete=(lots_total == 0 or len(lots) >= lots_total),
+                    sales=history,
+                )
+            except Exception as exc:
+                if log:
+                    log(f"{item_id}: журнал лотов недоступен ({exc})")
         rule = (config.get("item_rules") or {}).get(item_id) or {}
         item_config = dict(config)
         for source_key, target_key in (
@@ -1445,13 +1458,14 @@ def scan(
     cancel=None,
     log=None,
     history_store=None,
+    market_store=None,
 ) -> dict:
     started = time.time()
     now = datetime.now(timezone.utc)
     window_hours = float(config.get("days", 2)) * 24.0
     cutoff = now - timedelta(hours=window_hours)
     history_ttl = max(60.0, float(config.get("history_ttl_min", 30)) * 60.0)
-    workers = max(1, min(8, int(config.get("scan_workers", 4))))
+    workers = max(1, min(16, int(config.get("scan_workers", 4))))
 
     watchlist = [str(x) for x in (config.get("watchlist") or []) if str(x).strip()]
     if client.demo:
@@ -1471,6 +1485,13 @@ def scan(
     rules_skipped = len(configured_watch) - len(watchlist)
     if not watchlist:
         raise ApiError("Все предметы отключены в правилах. Включите хотя бы один.")
+
+    if market_store is not None:
+        try:
+            market_store.prune(keep_days=30)
+        except Exception as exc:
+            if log:
+                log(f"Не удалось почистить журнал лотов: {exc}")
 
     if history_store is not None:
         try:
@@ -1499,7 +1520,8 @@ def scan(
             if progress:
                 progress(index, total, item_id, "сканирование")
             result, inserted = _scan_one(
-                client, catalog, config, item_id, now, cutoff, window_hours, history_store, history_ttl, log
+                client, catalog, config, item_id, now, cutoff, window_hours, history_store, history_ttl, log,
+                market_store=market_store,
             )
             results_by_index[index] = result
             inserted_total += inserted
@@ -1520,6 +1542,7 @@ def scan(
                     history_store,
                     history_ttl,
                     log,
+                    market_store=market_store,
                 ): index
                 for index, item_id in enumerate(watchlist)
             }

@@ -7,6 +7,9 @@ data/history.db-wal
 data/history.db-shm
 data/dead_items.json
 data/portfolio.db
+data/market.db
+data/market.db-wal
+data/market.db-shm
 data/app.log
 data/launcher.log
 data/catalog.json

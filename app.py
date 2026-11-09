@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from catalog import Catalog
 from history_store import HistoryStore
+from market_store import MarketStore
 from portfolio import PortfolioStore
 from scanner import scan
 from stalzone import ApiError, REGIONS, make_client
@@ -51,6 +52,7 @@ CATALOG_PATH = DATA_DIR / "catalog.json"
 HISTORY_PATH = DATA_DIR / "history.db"
 DEAD_PATH = DATA_DIR / "dead_items.json"
 PORTFOLIO_PATH = DATA_DIR / "portfolio.db"
+MARKET_PATH = DATA_DIR / "market.db"
 CACHE_DIR = DATA_DIR / "cache"
 LOG_PATH = DATA_DIR / "app.log"
 BUNDLED_CATALOG = RESOURCE_DIR / "data" / "catalog.json"
@@ -421,11 +423,12 @@ class DeadList:
 
 
 class ScanManager:
-    def __init__(self, store: Store, catalog: Catalog, history_store=None, dead_list=None):
+    def __init__(self, store: Store, catalog: Catalog, history_store=None, dead_list=None, market_store=None):
         self.store = store
         self.catalog = catalog
         self.history_store = history_store
         self.dead_list = dead_list
+        self.market_store = market_store
         self.dead_skipped = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -572,6 +575,7 @@ class ScanManager:
                 cancel=self._cancel,
                 log=log_line,
                 history_store=self.history_store,
+                market_store=self.market_store,
             )
             invalid = [
                 item["id"]
@@ -646,7 +650,12 @@ class AppState:
             self.portfolio = PortfolioStore(PORTFOLIO_PATH)
         except Exception as exc:
             log_line(f"Портфель недоступен: {exc}")
-        self.manager = ScanManager(self.store, self.catalog, self.history, self.dead)
+        self.market = None
+        try:
+            self.market = MarketStore(MARKET_PATH)
+        except Exception as exc:
+            log_line(f"Журнал лотов недоступен: {exc}")
+        self.manager = ScanManager(self.store, self.catalog, self.history, self.dead, self.market)
         self.stop_event = threading.Event()
 
 
@@ -839,7 +848,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.3"
+    server_version = "SZAUCTRACKER/1.4"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -912,6 +921,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, _compact_results(self.state.manager.results or {}))
             elif path == "/api/analytics":
                 self._analytics(query)
+            elif path == "/api/movement":
+                self._movement(query)
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":
@@ -1088,6 +1099,34 @@ class Handler(BaseHTTPRequestHandler):
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _movement(self, query) -> None:
+        item = (query.get("item") or [""])[0].strip()
+        if not ITEM_ID_RE.match(item):
+            self._error(400, "Некорректный ID предмета")
+            return
+        try:
+            days = float((query.get("days") or ["7"])[0])
+        except ValueError:
+            days = 7.0
+        days = max(0.25, min(90.0, days))
+        market = self.state.market
+        if market is None:
+            self._json(200, {"item": item, "error": "Журнал лотов недоступен"})
+            return
+        try:
+            summary = market.summary(item, days)
+        except Exception as exc:
+            self._error(500, f"Не удалось прочитать журнал: {exc}")
+            return
+        meta = self.state.catalog.get(item)
+        name = item
+        category = "other"
+        if meta:
+            name = meta["name"].get("ru") or meta["name"].get("en") or item
+            category = meta.get("category", "other")
+        summary.update({"name": name, "category": category})
+        self._json(200, summary)
 
     def _portfolio(self) -> None:
         portfolio = self.state.portfolio
@@ -1481,9 +1520,17 @@ def run_once(args) -> int:
         history = HistoryStore(HISTORY_PATH)
     except Exception as exc:
         log_line(f"Локальная история недоступна: {exc}")
+    market = None
+    try:
+        market = MarketStore(MARKET_PATH)
+    except Exception as exc:
+        log_line(f"Журнал лотов недоступен: {exc}")
     try:
         client = make_client(config, CACHE_DIR)
-        results = scan(client, catalog, config, log=lambda msg: None, history_store=history)
+        results = scan(
+            client, catalog, config, log=lambda msg: None,
+            history_store=history, market_store=market,
+        )
         invalid = [
             item["id"]
             for item in results.get("items", [])
@@ -1497,6 +1544,8 @@ def run_once(args) -> int:
     finally:
         if history is not None:
             history.close()
+        if market is not None:
+            market.close()
     print_report(results)
     return 0
 
