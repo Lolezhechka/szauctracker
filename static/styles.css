@@ -612,6 +612,22 @@ select.input { padding-right: 28px; }
 .score.mid { background: rgba(232, 169, 74, 0.14); color: var(--orange); }
 .score.low { background: rgba(226, 103, 90, 0.14); color: var(--red); }
 .tag.discovery { color: var(--blue); border-color: rgba(111, 182, 216, 0.4); }
+
+.barter-offer { border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: var(--panel-2); }
+.barter-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.barter-head b { font-size: 13px; }
+.barter-head span { color: var(--muted); font-size: 11px; }
+.barter-head .tag { margin-left: auto; }
+.barter-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.barter-grid > div { background: rgba(0, 0, 0, 0.14); border-radius: 7px; padding: 7px 8px; }
+.barter-grid span { display: block; color: var(--muted-2); font-size: 10px; margin-bottom: 2px; }
+.barter-grid b { font-family: var(--mono); font-size: 12px; }
+.barter-grid b.good { color: var(--accent); }
+.barter-grid b.bad { color: var(--red); }
+.barter-components { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 9px; color: var(--muted); font-size: 11px; }
+.barter-component span { color: var(--muted-2); margin-left: 4px; }
+.barter-component.bad { color: var(--red); }
+@media (max-width: 760px) { .barter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tag.warn { color: var(--orange); border-color: rgba(232, 169, 74, 0.4); }
 .tag.bad { color: var(--red); border-color: rgba(226, 103, 90, 0.4); }
 

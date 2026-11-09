@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from barter import BarterBook, calculate_item
 from catalog import Catalog
 from history_store import HistoryStore
 from market_store import MarketStore
@@ -53,6 +54,7 @@ HISTORY_PATH = DATA_DIR / "history.db"
 DEAD_PATH = DATA_DIR / "dead_items.json"
 PORTFOLIO_PATH = DATA_DIR / "portfolio.db"
 MARKET_PATH = DATA_DIR / "market.db"
+BARTER_PATH = DATA_DIR / "barter_recipes.json"
 DISCOVERY_PATH = DATA_DIR / "discovery.json"
 CACHE_DIR = DATA_DIR / "cache"
 LOG_PATH = DATA_DIR / "app.log"
@@ -688,6 +690,10 @@ class AppState:
             self.market = MarketStore(MARKET_PATH)
         except Exception as exc:
             log_line(f"Журнал лотов недоступен: {exc}")
+        self.barter = BarterBook(BARTER_PATH)
+        self.barter.load_async()
+        self.barter_prices = {}
+        self.barter_lock = threading.Lock()
         self.manager = ScanManager(self.store, self.catalog, self.history, self.dead, self.market)
         self.stop_event = threading.Event()
 
@@ -882,7 +888,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.6"
+    server_version = "SZAUCTRACKER/1.7"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -957,6 +963,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._analytics(query)
             elif path == "/api/movement":
                 self._movement(query)
+            elif path == "/api/barter/items":
+                self._barter_items()
+            elif path == "/api/barter":
+                self._barter(query)
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":
@@ -1161,6 +1171,48 @@ class Handler(BaseHTTPRequestHandler):
             category = meta.get("category", "other")
         summary.update({"name": name, "category": category})
         self._json(200, summary)
+
+    def _barter_items(self) -> None:
+        book = self.state.barter
+        if not book.ready:
+            self._json(200, {"ready": False, "error": book.error, "items": []})
+            return
+        items = []
+        for item_id in book.items():
+            meta = self.state.catalog.get(item_id)
+            name = item_id
+            category = "other"
+            if meta:
+                name = meta["name"].get("ru") or meta["name"].get("en") or item_id
+                category = meta.get("category", "other")
+            items.append({"id": item_id, "name": name, "category": category})
+        self._json(200, {"ready": True, "error": book.error, "items": items})
+
+    def _barter(self, query) -> None:
+        item = (query.get("item") or [""])[0].strip()
+        if not ITEM_ID_RE.match(item):
+            self._error(400, "Некорректный ID предмета")
+            return
+        book = self.state.barter
+        if not book.ready:
+            self._json(200, {"item": item, "error": book.error or "Рецепты ещё загружаются"})
+            return
+        if not book.for_item(item):
+            self._json(200, {"item": item, "error": "Для этого предмета нет бартерного рецепта"})
+            return
+        config = self.state.store.snapshot()
+        try:
+            client = make_client(config, CACHE_DIR)
+            with self.state.barter_lock:
+                result = calculate_item(
+                    book, client, item, self.state.catalog,
+                    commission_pct=float(config.get("commission_pct", 5)),
+                    price_cache=self.state.barter_prices,
+                )
+        except Exception as exc:
+            self._error(500, f"Не удалось рассчитать бартер: {exc}")
+            return
+        self._json(200, result)
 
     def _portfolio(self) -> None:
         portfolio = self.state.portfolio

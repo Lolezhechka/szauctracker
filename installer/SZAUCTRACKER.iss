@@ -1,6 +1,6 @@
 ; SZAUCTRACKER installer (Inno Setup 7)
 #define MyAppName "SZAUCTRACKER"
-#define MyAppVersion "1.6"
+#define MyAppVersion "1.7"
 #define MyAppPublisher "Lolezhechka"
 #define MyAppURL "https://github.com/Lolezhechka/szauctracker"
 #define MyAppExeName "SZAUCTRACKER.exe"
@@ -35,11 +35,11 @@ MinVersion=10.0
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.6.0.0
+VersionInfoVersion=1.7.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=Установщик {#MyAppName}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion=1.6.0.0
+VersionInfoProductVersion=1.7.0.0
 VersionInfoOriginalFileName=SZAUCTRACKER-Setup-{#MyAppVersion}.exe
 VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 

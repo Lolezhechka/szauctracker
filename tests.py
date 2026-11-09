@@ -10,6 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from barter import BarterBook, calculate_item
 from catalog import Catalog
 from history_store import HistoryStore
 from market_store import MarketStore
@@ -1133,6 +1134,87 @@ class HistoryPaginationTests(unittest.TestCase):
         )
         self.assertEqual(len(prices), 2)
         self.assertEqual(len(client.calls), 2)
+
+
+class BarterTests(unittest.TestCase):
+    class FakeClient:
+        def __init__(self, lots, history):
+            self.lots = lots
+            self.history = history
+            self.lot_calls = []
+            self.history_calls = []
+
+        def get_lots(self, item, **kwargs):
+            self.lot_calls.append(item)
+            return {"total": len(self.lots.get(item, [])), "lots": self.lots.get(item, [])}
+
+        def get_history(self, item, **kwargs):
+            self.history_calls.append(item)
+            return {"total": len(self.history.get(item, [])), "prices": self.history.get(item, [])}
+
+    def make_book(self):
+        book = BarterBook("unused.json")
+        book._install([
+            {
+                "settlementTitle": {"lines": {"ru": "Бар"}},
+                "recipes": [
+                    {
+                        "item": "out",
+                        "settlementRequiredLevel": 3,
+                        "offers": [
+                            {
+                                "cost": 100,
+                                "requiredItems": [{"item": "comp", "amount": 2}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ])
+        return book
+
+    def test_barter_book_and_calculation(self):
+        now = datetime.now(timezone.utc)
+        lots = {
+            "out": [{"amount": 1, "buyoutPrice": 1000, "additional": {}}],
+            "comp": [
+                {"amount": 1, "buyoutPrice": 100, "additional": {}},
+                {"amount": 1, "buyoutPrice": 110, "additional": {}},
+            ],
+        }
+        history = {
+            "out": [{"amount": 1, "price": 1000, "time": iso(now), "additional": {}}],
+            "comp": [{"amount": 1, "price": 100, "time": iso(now), "additional": {}}],
+        }
+        client = self.FakeClient(lots, history)
+        book = self.make_book()
+        self.assertEqual(book.items(), ["out"])
+        result = calculate_item(book, client, "out", commission_pct=5, price_cache={})
+        self.assertEqual(result["recipes"], 1)
+        offer = result["offers"][0]
+        self.assertEqual(offer["components_cost"], 210)
+        self.assertEqual(offer["total_cost"], 310)
+        self.assertEqual(offer["sale_price"], 1000)
+        self.assertEqual(offer["profit"], 640)
+        self.assertTrue(offer["available"])
+        self.assertEqual(result["name"], "out")
+        self.assertEqual(client.lot_calls.count("out"), 1)
+        self.assertEqual(client.lot_calls.count("comp"), 1)
+
+    def test_barter_flags_not_enough_component(self):
+        now = datetime.now(timezone.utc)
+        lots = {
+            "out": [{"amount": 1, "buyoutPrice": 1000, "additional": {}}],
+            "comp": [{"amount": 1, "buyoutPrice": 100, "additional": {}}],
+        }
+        history = {
+            "out": [{"amount": 1, "price": 1000, "time": iso(now), "additional": {}}],
+            "comp": [{"amount": 1, "price": 100, "time": iso(now), "additional": {}}],
+        }
+        result = calculate_item(self.make_book(), self.FakeClient(lots, history), "out", price_cache={})
+        offer = result["offers"][0]
+        self.assertFalse(offer["available"])
+        self.assertFalse(offer["components"][0]["enough"])
 
 
 class MarketStoreTests(unittest.TestCase):

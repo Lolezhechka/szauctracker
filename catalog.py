@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 CATALOG_URL = "https://cdn.stalcraft.wiki/exbo_item_parser/listing.json"
-USER_AGENT = "SZAUCTRACKER/1.6 (local tool)"
+USER_AGENT = "SZAUCTRACKER/1.7 (local tool)"
 
 CATEGORY_LABELS = {
     "artefact": "Артефакты",

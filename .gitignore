@@ -14,6 +14,7 @@ data/market.db-shm
 data/app.log
 data/launcher.log
 data/catalog.json
+data/barter_recipes.json
 
 # Сборка
 build/

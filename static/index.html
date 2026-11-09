@@ -30,6 +30,7 @@
   <button class="tab" data-tab="stacks">Стаки <span id="stacksBadge" class="badge muted">0</span></button>
   <button class="tab" data-tab="analytics">Аналитика</button>
   <button class="tab" data-tab="movement">Движение</button>
+  <button class="tab" data-tab="barter">Бартер</button>
   <button class="tab" data-tab="portfolio">Портфель</button>
   <button class="tab" data-tab="watch">Наблюдение <span id="watchBadge" class="badge">0</span></button>
   <button class="tab" data-tab="settings">Настройки</button>
@@ -331,6 +332,26 @@
       </table>
     </div>
     <div class="empty" id="movementEmpty">Нет накопленных наблюдений. Оставьте приложение запущенным — журнал заполнится при следующих сканах.</div>
+  </div>
+</section>
+
+<!-- ============================ БАРТЕР ============================ -->
+<section id="tab-barter" class="tab-panel">
+  <div class="toolbar">
+    <select id="barterItem" class="input select"></select>
+    <button type="button" id="barterRefresh" class="btn">Рассчитать</button>
+  </div>
+
+  <div class="summary">
+    <div class="stat"><span class="stat-label">Медиана продаж</span><strong id="barterPrice">—</strong><span class="stat-sub">выходной предмет</span></div>
+    <div class="stat"><span class="stat-label">Минимальный лот</span><strong id="barterAsk">—</strong><span class="stat-sub">текущий рынок</span></div>
+    <div class="stat"><span class="stat-label">Рецептов</span><strong id="barterRecipes">—</strong><span class="stat-sub">вариантов обмена</span></div>
+    <div class="stat accent"><span class="stat-label">Лучший профит</span><strong id="barterBest">—</strong><span class="stat-sub" id="barterBestSub">после комиссии</span></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Варианты бартера</h2><span id="barterInfo" class="muted"></span></div>
+    <div id="barterResult"><div class="empty">Выберите предмет и нажмите «Рассчитать».</div></div>
   </div>
 </section>
 

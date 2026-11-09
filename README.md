@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-1.6.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.6/SZAUCTRACKER-Setup-1.6.exe)
+  [SZAUCTRACKER-Setup-1.7.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.7/SZAUCTRACKER-Setup-1.7.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.6/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v1.7/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 1.6 в свойствах Windows.
+   иконка и версия 1.7 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -190,6 +190,13 @@ Portable-версия ничего не устанавливает: все да�
 * кнопка «＋» добавляет предмет в наблюдение;
 * discovery-предметы не попадают в список наблюдения автоматически.
 
+**Бартер**
+* выбор выходного предмета из 514 рецептов;
+* цена продажи — медиана фактических продаж;
+* стоимость компонентов — по самым дешёвым активным лотам с учётом доступного количества;
+* деньги, себестоимость, профит и маржа после комиссии;
+* предупреждение, если компонента не хватает на рынке или у него нет цены.
+
 **Движение**
 * журнал активных лотов между сканами: появление, изменение цены, исчезновение;
 * «вероятно продан» сопоставляется с продажами по количеству, цене и времени;
@@ -326,6 +333,7 @@ python app.py --once --items 04yr,1kdg,g34p
 | `data/history.db` | накопленная локальная история продаж (SQLite, хранится 7 дней) |
 | `data/portfolio.db` | портфель: покупки, продажи, P&L (SQLite) |
 | `data/market.db` | журнал движения лотов: появления, изменения цены, вероятные продажи, истечения (SQLite) |
+| `data/barter_recipes.json` | кэш официальных бартерных рецептов |
 | `data/dead_items.json` | ID, которые API считает недействительными (пропускаются 7 дней) |
 | `data/discovery.json` | курсор обхода предметов вне списка наблюдения |
 | `data/cache/*.json` | кэш ответов API (чистится от файлов старше 7 дней и старше 50 МБ) |
@@ -369,9 +377,10 @@ stalzone.py         клиент eAPI: авторизация, rate limit, кэ�
 scanner.py          расчёт средней, стаки, группировка, поиск сделок
 history_store.py    локальное накопление продаж в SQLite
 catalog.py          справочник предметов, поиск, категории
+barter.py           бартерный калькулятор и котировки компонентов
 market_store.py     журнал жизненного цикла лотов (SQLite)
 static/             интерфейс (HTML/CSS/JS без внешних зависимостей)
-tests.py            95 тестов логики
+tests.py            97 тестов логики
 start.bat           запуск из исходников в Windows
 SZAUCTRACKER.spec  конфигурация PyInstaller для пересборки
 make_icon.py        генератор иконки (все размеры ICO, включая 16×16)
@@ -406,7 +415,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-1.6.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-1.7.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты

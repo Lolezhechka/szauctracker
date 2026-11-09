@@ -17,6 +17,7 @@ const state = {
   deadItems: [],
   analytics: { item: null, days: 7, variant: null, data: null },
   movement: { item: null, days: 7, data: null },
+  barter: { items: null, item: null, data: null, ready: false, error: null },
   portfolio: null,
   ruleItem: null,
 };
@@ -196,13 +197,15 @@ function bindTabs() {
     switchTab(tab.dataset.tab);
     if (tab.dataset.tab === "analytics") ensureAnalytics();
     if (tab.dataset.tab === "movement") ensureMovement();
+    if (tab.dataset.tab === "barter") ensureBarter();
     if (tab.dataset.tab === "portfolio") ensurePortfolio();
   }));
   const initial = location.hash.replace("#", "");
-  if (["deals", "stacks", "analytics", "movement", "portfolio", "watch", "settings"].includes(initial)) {
+  if (["deals", "stacks", "analytics", "movement", "barter", "portfolio", "watch", "settings"].includes(initial)) {
     switchTab(initial);
     if (initial === "analytics") ensureAnalytics();
     if (initial === "movement") ensureMovement();
+    if (initial === "barter") ensureBarter();
     if (initial === "portfolio") ensurePortfolio();
   }
 }
@@ -1504,6 +1507,112 @@ function bindMovement() {
   $("#movementRefresh").addEventListener("click", loadMovement);
 }
 
+// ------------------------------------------------------------------ бартер
+
+async function renderBarterItems() {
+  const select = $("#barterItem");
+  if (!select) return;
+  try {
+    const data = await api("/api/barter/items");
+    state.barter.ready = !!data.ready;
+    state.barter.error = data.error || null;
+    const items = (data.items || []).slice().sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    if (!items.length) {
+      select.innerHTML = `<option value="">${esc(data.error || "Нет рецептов")}</option>`;
+      state.barter.items = [];
+      return;
+    }
+    const current = select.value || state.barter.item;
+    select.innerHTML = items.map((item) => `<option value="${esc(item.id)}">${esc(item.name)} (${esc(item.id)})</option>`).join("");
+    const chosen = items.some((item) => item.id === current) ? current : items[0].id;
+    state.barter.item = chosen;
+    state.barter.items = items;
+    select.value = chosen;
+  } catch (error) {
+    select.innerHTML = `<option value="">Ошибка: ${esc(error.message)}</option>`;
+    state.barter.error = error.message;
+  }
+}
+
+function barterOfferHtml(offer) {
+  const profitClass = (offer.profit || 0) > 0 ? "good" : "bad";
+  const badge = offer.available
+    ? `<span class="tag discovery">хватает лотов</span>`
+    : `<span class="tag bad">не хватает лотов</span>`;
+  const components = (offer.components || []).map((part) => {
+    const price = part.unit == null ? "нет цены" : `${moneyFine(part.unit)} × ${money(part.amount)} = ${moneyFine(part.cost)}`;
+    return `<div class="barter-component ${part.enough ? "" : "bad"}">${esc(part.name)} <span>${price}</span></div>`;
+  }).join("");
+  return `<div class="barter-offer">
+    <div class="barter-head">
+      <b>${esc(offer.settlement)}</b>
+      <span>уровень ${money(offer.level)}</span>
+      ${badge}
+    </div>
+    <div class="barter-grid">
+      <div><span>Деньги</span><b>${money(offer.money)}</b></div>
+      <div><span>Компоненты</span><b>${moneyFine(offer.components_cost)}</b></div>
+      <div><span>Себестоимость</span><b>${moneyFine(offer.total_cost)}</b></div>
+      <div><span>Цена продажи</span><b>${moneyFine(offer.sale_price)}</b></div>
+      <div><span>Профит</span><b class="${profitClass}">${offer.profit == null ? "—" : `${offer.profit > 0 ? "+" : ""}${moneyFine(offer.profit)}`}</b></div>
+      <div><span>Маржа</span><b class="${profitClass}">${offer.margin_pct == null ? "—" : pct(offer.margin_pct)}</b></div>
+    </div>
+    <div class="barter-components">${components}</div>
+  </div>`;
+}
+
+function renderBarter(data) {
+  const summary = data || {};
+  const output = summary.output || {};
+  $("#barterPrice").textContent = moneyFine(output.sales_median);
+  $("#barterAsk").textContent = moneyFine(output.unit_min);
+  $("#barterRecipes").textContent = money(summary.recipes || 0);
+  const best = summary.best;
+  $("#barterBest").textContent = best && best.profit != null ? `${best.profit > 0 ? "+" : ""}${money(best.profit)}` : "—";
+  $("#barterBestSub").textContent = best && best.margin_pct != null ? `${pct(best.margin_pct)} маржи` : "после комиссии";
+  $("#barterInfo").textContent = summary.name ? `${summary.name} · комиссия ${summary.commission_pct}%` : "";
+  const error = summary.error ? `<p class="hint warn">${esc(summary.error)}</p>` : "";
+  const errors = summary.errors && Object.keys(summary.errors).length
+    ? `<p class="hint warn">Не удалось получить цены: ${esc(Object.keys(summary.errors).join(", "))}</p>`
+    : "";
+  if (!summary.offers || !summary.offers.length) {
+    $("#barterResult").innerHTML = `${error}${errors}<div class="empty">${esc(summary.error || "Для выбранного предмета нет рецептов.")}</div>`;
+    return;
+  }
+  $("#barterResult").innerHTML = `${error}${errors}${summary.offers.map(barterOfferHtml).join("")}`;
+}
+
+async function loadBarter() {
+  const item = $("#barterItem") ? $("#barterItem").value : "";
+  if (!item) return;
+  state.barter.item = item;
+  $("#barterResult").innerHTML = `<div class="empty">Считаю цены компонентов…</div>`;
+  try {
+    const data = await api(`/api/barter?item=${encodeURIComponent(item)}`);
+    state.barter.data = data;
+    renderBarter(data);
+  } catch (error) {
+    $("#barterResult").innerHTML = `<div class="empty">Не удалось рассчитать: ${esc(error.message)}</div>`;
+  }
+}
+
+async function ensureBarter() {
+  if (!state.barter.items || !state.barter.items.length) await renderBarterItems();
+  if (!state.barter.item) state.barter.item = (state.barter.items || [])[0]?.id || null;
+  if (!state.barter.item) return;
+  const select = $("#barterItem");
+  if (select && [...select.options].some((option) => option.value === state.barter.item)) select.value = state.barter.item;
+  if (!state.barter.data || state.barter.data.item !== state.barter.item) await loadBarter();
+}
+
+function bindBarter() {
+  const select = $("#barterItem");
+  const refresh = $("#barterRefresh");
+  if (!select || !refresh) return;
+  select.addEventListener("change", loadBarter);
+  refresh.addEventListener("click", loadBarter);
+}
+
 function bindAnalytics() {
   const itemSelect = $("#analyticsItem");
   const daysSelect = $("#analyticsDays");
@@ -1946,6 +2055,7 @@ async function init() {
   bindStacks();
   bindAnalytics();
   bindMovement();
+  bindBarter();
   bindPortfolio();
   bindRuleEditor();
   bindWatch();
