@@ -1157,6 +1157,18 @@ class MarketStoreTests(unittest.TestCase):
             counts = store.observe("item4", [], now=now + timedelta(minutes=1), complete=False)
             self.assertEqual(counts["missing"], 0)
             self.assertEqual(store.summary("item4", 7)["supply_lots"], 1)
+
+            # Продажа до первого наблюдения не может относиться к этому лоту.
+            old_sale = {
+                "amount": 1,
+                "price": 500,
+                "time": iso(now - timedelta(hours=1)),
+                "additional": {},
+            }
+            counts = store.observe("item5", [self.make_lot(unit=500)], now=now)
+            counts = store.observe("item5", [], now=now + timedelta(minutes=1), sales=[old_sale])
+            self.assertEqual(counts.get("probable_sold", 0), 0)
+            self.assertEqual(counts["missing"], 1)
             store.close()
 
     def test_prune_and_duplicate_signature(self):

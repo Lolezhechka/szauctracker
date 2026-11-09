@@ -848,7 +848,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.4"
+    server_version = "SZAUCTRACKER/1.5"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы

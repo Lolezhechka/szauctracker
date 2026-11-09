@@ -237,7 +237,7 @@ class MarketStore:
             if sale_unit <= 0 or abs(sale_unit - unit) > max(0.01, unit * 0.02):
                 continue
             ts = _sale_ts(sale)
-            if ts is None or ts < max(now_ts - 86400, first_seen - 300) or ts > now_ts + 300:
+            if ts is None or ts < first_seen - 300 or ts > now_ts + 300:
                 continue
             used.add(index)
             return sale
