@@ -1,6 +1,6 @@
 """Клиент STALZONE eAPI (только стандартная библиотека Python).
 
-Документация: https://eapi.stalzone.com/reference
+Документация: https://eapi.stalzone.net/reference
 Авторизация приложения: заголовки Client-Id / Client-Secret.
 Лимит: 400 токенов в минуту, запрос аукциона стоит 2 токена.
 """
@@ -19,15 +19,17 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-BASE_PROD = "https://eapi.stalzone.com"
-BASE_DEMO = "https://dapi.stalzone.com"
+# .net — актуальный хост. На .com Cloudflare с 19.10.2026 кэширует ответы
+# без query-строки: offset/limit/sort игнорируются, пагинация не работает.
+BASE_PROD = "https://eapi.stalzone.net"
+BASE_DEMO = "https://dapi.stalzone.net"
 
 # Публичные демо-ключи из документации. Работают только с dapi и ограниченным
 # набором предметов — нужны, чтобы проверить интерфейс без регистрации.
 DEMO_CLIENT_ID = "1"
 DEMO_CLIENT_SECRET = "E98cm6J9NNjTQopph0c2eIXNKafg4R1Cjz0TZh2D"
 
-USER_AGENT = "SZAUCTRACKER/1.1 (local tool)"
+USER_AGENT = "SZAUCTRACKER/1.2 (local tool)"
 
 REGIONS = [
     {"id": "RU", "name": "Россия"},

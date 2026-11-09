@@ -88,6 +88,17 @@
     </select>
     <input id="dealMinPercent" class="input" type="number" min="0" max="200" step="1" placeholder="% артефакта" style="width:120px">
     <select id="dealBonus" class="input select"><option value="">Любой бонус</option></select>
+    <select id="dealMinReliability" class="input select">
+      <option value="">Любая надёжность</option>
+      <option value="medium">надёжность средняя+</option>
+      <option value="high">только высокая</option>
+    </select>
+    <select id="dealMaxTime" class="input select">
+      <option value="0">Любой срок</option>
+      <option value="6">истекает до 6 ч</option>
+      <option value="24">до 24 ч</option>
+      <option value="72">до 3 дней</option>
+    </select>
     <select id="dealSort" class="input select">
       <option value="total" selected>Сначала больше сумма</option>
       <option value="discount">Сначала выгоднее (%)</option>
@@ -445,10 +456,17 @@
           <span class="field-hint">одинаковые лоты склеиваются, прибыль считается по сумме; по умолчанию 5 000</span>
         </label>
         <label>Страниц лотов (1 стр. = 200 лотов)
-          <input name="lots_pages" class="input" type="number" min="1" max="5" step="1">
+          <input name="lots_pages" class="input" type="number" min="1" max="10" step="1">
+          <span class="field-hint">вторая страница нужна предметам с более 200 активными лотами</span>
+        </label>
+        <label>Страниц истории (1 стр. = 200 продаж)
+          <input name="history_pages" class="input" type="number" min="1" max="10" step="1">
+          <span class="field-hint">добирает историю, пока не покроет окно; больше страниц — точнее, но дольше скан</span>
         </label>
         <label class="check-line"><input name="group_by_qlt" type="checkbox"> Сравнивать только одинаковое качество</label>
         <label class="check-line"><input name="group_by_ptn" type="checkbox"> Сравнивать только одинаковый паттерн / апгрейд</label>
+        <label class="check-line"><input name="group_by_stack" type="checkbox"> Сравнивать лоты с продажами того же размера стака</label>
+        <label class="check-line"><input name="group_by_percent" type="checkbox"> Учитывать процент артефакта (если известен)</label>
       </div>
       <p class="hint">«Ограничивать базу текущим рынком» не даёт средней по прошлым продажам завышать цену продажи, если рынок уже упал: для каждого лота база ограничивается 25-м перцентилем цен конкурирующих лотов того же варианта. Отключите, если хотите видеть чистую медиану продаж.</p>
     </div>
@@ -483,7 +501,7 @@
           <input name="scan_interval_min" class="input" type="number" min="1" max="180" step="1">
         </label>
         <label>Параллельных запросов
-          <input name="scan_workers" class="input" type="number" min="1" max="8" step="1">
+          <input name="scan_workers" class="input" type="number" min="1" max="16" step="1">
           <span class="field-hint">больше — быстрее, но выше лимита API не прыгнуть</span>
         </label>
         <label>Обновлять историю, мин
@@ -492,7 +510,7 @@
         </label>
       </div>
       <p class="hint">Лимит API — 400 токенов/мин, один запрос аукциона стоит 2 токена. Приложение само выдерживает темп (~190 запросов/мин), запрашивает предметы параллельно и не тратит запрос истории на предметы без лотов.</p>
-      <p class="hint">API отдаёт только <b>200 последних продаж</b> на предмет. Приложение сохраняет их в локальную базу и постепенно накапливает полное окно — поэтому в первые часы покрытие может быть меньше выбранных дней. Реальное покрытие видно в деталях сделки.</p>
+      <p class="hint">API отдаёт по <b>200 продаж на страницу</b>. Приложение добирает страницы до выбранного окна, сохраняет продажи в локальную базу и постепенно накапливает полную историю. Если истории всё ещё мало, покрытие будет меньше выбранных дней — реальное покрытие видно в деталях сделки.</p>
     </div>
 
     <div class="form-actions">
@@ -508,7 +526,7 @@
 
 <footer class="footer">
   <div id="apiInfo">API: —</div>
-  <div>Локальное приложение · данные никуда не отправляются, кроме eapi.stalzone.com</div>
+  <div>Локальное приложение · данные никуда не отправляются, кроме eapi.stalzone.net</div>
 </footer>
 
 <div id="toasts" class="toasts"></div>

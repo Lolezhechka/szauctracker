@@ -395,8 +395,11 @@ function renderSettings() {
   form.elements.max_price.value = cfg.max_price;
   form.elements.min_profit.value = cfg.min_profit;
   form.elements.lots_pages.value = cfg.lots_pages;
+  form.elements.history_pages.value = cfg.history_pages;
   form.elements.group_by_qlt.checked = !!cfg.group_by_qlt;
   form.elements.group_by_ptn.checked = !!cfg.group_by_ptn;
+  form.elements.group_by_stack.checked = cfg.group_by_stack !== false;
+  form.elements.group_by_percent.checked = cfg.group_by_percent !== false;
   form.elements.auto_scan.checked = !!cfg.auto_scan;
   form.elements.scan_interval_min.value = cfg.scan_interval_min;
   form.elements.scan_workers.value = cfg.scan_workers;
@@ -429,8 +432,11 @@ function collectSettings() {
     max_price: Number(value("max_price")),
     min_profit: Number(value("min_profit")),
     lots_pages: Number(value("lots_pages")),
+    history_pages: Number(value("history_pages")),
     group_by_qlt: checked("group_by_qlt"),
     group_by_ptn: checked("group_by_ptn"),
+    group_by_stack: checked("group_by_stack"),
+    group_by_percent: checked("group_by_percent"),
     auto_scan: checked("auto_scan"),
     scan_interval_min: Number(value("scan_interval_min")),
     scan_workers: Number(value("scan_workers")),
@@ -665,7 +671,10 @@ function filteredDeals() {
   const minQlt = $("#dealMinQlt").value;
   const minPercent = Number($("#dealMinPercent").value || 0);
   const bonus = $("#dealBonus").value;
+  const minReliability = $("#dealMinReliability").value;
+  const maxTime = Number($("#dealMaxTime").value || 0);
   const onlyLiquid = $("#onlyLiquid").checked;
+  const reliabilityRank = { low: 0, medium: 1, high: 2 };
 
   let rows = (state.results.deals || []).filter((deal) => {
     if (deal.discount_pct < minDiscount) return false;
@@ -677,6 +686,8 @@ function filteredDeals() {
     if (bonus && !(deal.bonus_properties || []).includes(bonus)) return false;
     if (category && categoryOf(deal.category) !== category) return false;
     if (onlyLiquid && (deal.volume || 0) < 3) return false;
+    if (minReliability && (reliabilityRank[deal.reliability || "low"] ?? 0) < reliabilityRank[minReliability]) return false;
+    if (maxTime && (deal.time_left_min ?? Number.POSITIVE_INFINITY) > maxTime * 60) return false;
     if (query) {
       const haystack = [deal.name, deal.item_id, deal.qlt_label, deal.ptn_label, deal.category]
         .filter(Boolean).join(" ").toLowerCase();
@@ -696,6 +707,17 @@ function filteredDeals() {
   return rows;
 }
 
+function comparableLabel(basis) {
+  if (!basis) return "—";
+  if (basis === "overall") return "весь вариант";
+  if (basis === "percent:known") return "известный процент";
+  if (basis === "percent:unknown") return "процент неизвестен";
+  if (basis.startsWith("percent:")) return `процент ${basis.slice(8)}%`;
+  if (basis.startsWith("amount-near:")) return `ближайший стак ${basis.slice(12)}`;
+  if (basis.startsWith("amount:")) return `стак ${basis.slice(7)}`;
+  return basis;
+}
+
 function reliabilityHtml(level) {
   const text = { high: "высокая", medium: "средняя", low: "низкая" }[level] || "—";
   return `<span class="reliability ${esc(level || "low")}" title="Надёжность оценки: ${text} (объём продаж)"><i></i><i></i><i></i><span class="rel-text">${text}</span></span>`;
@@ -706,7 +728,18 @@ function dealRowHtml(deal, index) {
   if (deal.qlt_label) tags.push(`<span class="tag qlt-${esc(deal.qlt)}">${esc(deal.qlt_label)}</span>`);
   if (deal.ptn_label) tags.push(`<span class="tag">${esc(deal.ptn_label)}</span>`);
   if (deal.artifact_percent !== null && deal.artifact_percent !== undefined) {
-    tags.push(`<span class="tag pct" title="Процент артефакта">${esc(deal.artifact_percent)}%</span>`);
+    const band = deal.percent_band ? ` · диапазон ${deal.percent_band}%` : "";
+    tags.push(`<span class="tag pct" title="Процент артефакта${band}">${esc(deal.artifact_percent)}%</span>`);
+  }
+  if (deal.amount > 1 && deal.amount_band_label) {
+    tags.push(`<span class="tag" title="Сравнение с продажами стаков этого размера">стак ${esc(deal.amount_band_label)}</span>`);
+  }
+  if (deal.variant_unknown) {
+    tags.push(`<span class="tag warn" title="API не прислал качество/вариант — цена может быть смешана">вариант?</span>`);
+  }
+  for (const flag of deal.restrictions || []) {
+    const label = flag === "sell_is_blocked" ? "продажа заблокирована" : "персональный";
+    tags.push(`<span class="tag bad" title="Проверьте, можно ли перепродать этот предмет">${esc(label)}</span>`);
   }
   const hot = deal.discount_pct >= 20 ? " hot" : "";
   const market = deal.market_min !== null && deal.market_min !== undefined
@@ -734,7 +767,7 @@ function dealRowHtml(deal, index) {
       <td class="num price">${moneyFine(deal.unit_price)}</td>
       <td class="num stack-qty">${money(deal.amount)}${deal.lots_count > 1 ? `<small>${deal.lots_count} лот(ов)</small>` : ""}</td>
       <td class="num profit total">+${money(deal.total_net)}</td>
-      <td class="num disc${hot}">−${pct(deal.discount_pct)}</td>
+      <td class="num disc${hot}" title="Насколько цена лота ниже базы">${pct(deal.discount_pct)}</td>
       <td class="num profit">+${moneyFine(deal.net_unit)}</td>
       <td class="num">${moneyFine(deal.benchmark)}</td>
       <td class="num market" title="Активные лоты того же варианта: минимум–25-й перцентиль">${market}</td>
@@ -756,7 +789,13 @@ function dealRowHtml(deal, index) {
           <div class="detail-item">База продаж<b>${moneyFine(deal.sales_base)}</b></div>
           <div class="detail-item">Потолок по лотам<b>${moneyFine(deal.market_cap)}</b></div>
           <div class="detail-item">База расчёта<b>${esc(BENCH_LABELS[deal.benchmark_mode] || deal.benchmark_mode || "")}${deal.capped ? " · ограничена рынком" : ""}</b></div>
-          <div class="detail-item">Продаж в окне<b>${money(deal.volume)} шт. / ${deal.sales_count} лот(ов)</b></div>
+          <div class="detail-item">Сравнение<b>${esc(comparableLabel(deal.comparable_basis))}</b></div>
+          <div class="detail-item">Сопоставимых продаж<b>${money(deal.volume)} шт. / ${deal.sales_count} лот(ов)</b></div>
+          <div class="detail-item">Размер стека<b>${esc(deal.amount_band_label || (deal.amount > 1 ? `${deal.amount} шт.` : "1 шт."))}</b></div>
+          ${deal.percent_band ? `<div class="detail-item">Диапазон процента<b>${esc(deal.percent_band)}%</b></div>` : ""}
+          ${deal.amount_fallback || deal.percent_fallback ? `<div class="detail-item">Точность<b class="bad">сравнение с ближайшим диапазоном</b></div>` : ""}
+          ${deal.variant_unknown ? `<div class="detail-item">Вариант<b class="bad">не определён API</b></div>` : ""}
+          ${(deal.restrictions || []).length ? `<div class="detail-item">Ограничения<b class="bad">${esc((deal.restrictions || []).join(", "))}</b></div>` : ""}
           <div class="detail-item">Отброшено (вне рынка ×10)<b>${money(deal.sales_filtered || 0)}</b></div>
           <div class="detail-item">Темп продаж<b>~${deal.sales_per_day} шт./день</b></div>
           <div class="detail-item">Хватит на<b>${deal.sales_per_day ? `~${Math.ceil((deal.amount || 0) / deal.sales_per_day)} дн. продаж` : "—"}</b></div>

@@ -606,6 +606,8 @@ select.input { padding-right: 28px; }
 .analytics-stat b { display: block; font-family: var(--mono); font-size: 14px; font-weight: 500; margin-top: 2px; }
 
 .tag.pct { color: var(--accent); border-color: rgba(168, 224, 95, 0.35); }
+.tag.warn { color: var(--orange); border-color: rgba(232, 169, 74, 0.4); }
+.tag.bad { color: var(--red); border-color: rgba(226, 103, 90, 0.4); }
 
 .detail-item .good { color: var(--accent); }
 .detail-item .bad { color: var(--red); }

@@ -13,8 +13,8 @@ from pathlib import Path
 from catalog import Catalog
 from history_store import HistoryStore
 from portfolio import PortfolioStore
-from stalzone import DiskCache
-from scanner import analyze_item, artifact_percent, compute_stats, group_key, scan
+from stalzone import BASE_DEMO, BASE_PROD, DiskCache
+from scanner import analyze_item, artifact_percent, compute_stats, fetch_history, group_key, percent_band, scan, stack_band
 from app import Store, _clean_watchlist, _compact_results, DeadList
 
 NOW = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
@@ -222,13 +222,19 @@ class StoreTests(unittest.TestCase):
     def test_scan_optimization_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "config.json")
-            self.assertEqual(store.snapshot()["scan_workers"], 8)
+            self.assertEqual(store.snapshot()["scan_workers"], 10)
             self.assertEqual(store.snapshot()["history_ttl_min"], 30)
             self.assertEqual(store.snapshot()["min_price"], 5000)
             self.assertEqual(store.snapshot()["min_profit"], 5000)
-            store.update({"scan_workers": 99, "history_ttl_min": 0})
-            self.assertEqual(store.snapshot()["scan_workers"], 8)
+            self.assertEqual(store.snapshot()["lots_pages"], 2)
+            self.assertEqual(store.snapshot()["history_pages"], 5)
+            self.assertTrue(store.snapshot()["group_by_stack"])
+            self.assertTrue(store.snapshot()["group_by_percent"])
+            store.update({"scan_workers": 99, "history_ttl_min": 0, "history_pages": 99, "lots_pages": 0})
+            self.assertEqual(store.snapshot()["scan_workers"], 16)
             self.assertEqual(store.snapshot()["history_ttl_min"], 1)
+            self.assertEqual(store.snapshot()["history_pages"], 10)
+            self.assertEqual(store.snapshot()["lots_pages"], 1)
 
     def test_cap_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -891,6 +897,154 @@ class DeadListTests(unittest.TestCase):
             path.write_text(json.dumps({"old": time.time() - 10 * 86400}), encoding="utf-8")
             dead = DeadList(path)
             self.assertEqual(dead.ids(), [])
+
+
+class ComparableBandTests(unittest.TestCase):
+    def analyze_cat(self, lots, history, category="consumables/food", **overrides):
+        return analyze_item(
+            "test",
+            {"name": "Тестовый предмет", "category": category},
+            lots,
+            history,
+            cfg(**overrides),
+            NOW,
+            CUTOFF,
+            history_total=len(history),
+        )
+
+    def test_stack_band_helpers(self):
+        self.assertEqual(stack_band(1), "1")
+        self.assertEqual(stack_band(2), "2-4")
+        self.assertEqual(stack_band(9), "5-9")
+        self.assertEqual(stack_band(10), "10-19")
+        self.assertEqual(stack_band(49), "20-49")
+        self.assertEqual(stack_band(50), "50+")
+        self.assertEqual(percent_band(110), "110-119")
+        self.assertEqual(percent_band(125), "120-129")
+        self.assertIsNone(percent_band(None))
+
+    def test_bulk_lot_is_not_compared_with_singles(self):
+        history = [sale(1000) for _ in range(5)] + [sale(600, amount=50) for _ in range(5)]
+        result = self.analyze_cat([lot(700, amount=50)], history)
+        # Старая общая медиана ~800 дала бы ложную скидку 12,5%.
+        self.assertEqual(result["deals"], [])
+
+        result = self.analyze_cat([lot(500, amount=50)], history)
+        self.assertEqual(len(result["deals"]), 1)
+        deal = result["deals"][0]
+        self.assertEqual(deal["benchmark"], 600)
+        self.assertEqual(deal["amount_band"], "50+")
+        self.assertEqual(deal["comparable_basis"], "amount:50+")
+
+    def test_single_lot_still_uses_singles(self):
+        history = [sale(1000) for _ in range(5)] + [sale(600, amount=50) for _ in range(5)]
+        result = self.analyze_cat([lot(850)], history)
+        self.assertEqual(len(result["deals"]), 1)
+        deal = result["deals"][0]
+        self.assertEqual(deal["benchmark"], 1000)
+        self.assertEqual(deal["amount_band"], "1")
+        self.assertFalse(deal["amount_fallback"])
+
+    def test_bulk_without_comparable_band_is_skipped(self):
+        history = [sale(1000) for _ in range(5)]
+        result = self.analyze_cat([lot(500, amount=3)], history)
+        self.assertEqual(result["deals"], [])
+
+    def test_nearest_bulk_band_can_be_used(self):
+        history = [sale(800, amount=20) for _ in range(3)]
+        result = self.analyze_cat([lot(600, amount=10)], history)
+        self.assertEqual(len(result["deals"]), 1)
+        deal = result["deals"][0]
+        self.assertEqual(deal["benchmark"], 800)
+        self.assertEqual(deal["amount_band"], "10-19")
+        self.assertTrue(deal["amount_fallback"])
+        self.assertEqual(deal["comparable_basis"], "amount-near:10-19")
+
+    def test_artifact_percent_bands_and_per_lot_metadata(self):
+        history = [
+            sale(1000, qlt=2, ptn=15, stats_random=-2) for _ in range(5)
+        ] + [
+            sale(1500, qlt=2, ptn=15, stats_random=2) for _ in range(5)
+        ]
+        lots = [
+            lot(900, qlt=2, ptn=15, stats_random=-2, bonus_properties=["A"]),
+            lot(900, qlt=2, ptn=15, stats_random=2, bonus_properties=["B"]),
+        ]
+        result = self.analyze_cat(lots, history, category="artefact/biochemical")
+        self.assertEqual(len(result["deals"]), 2)
+        by_percent = {deal["artifact_percent"]: deal for deal in result["deals"]}
+        self.assertEqual(by_percent[110]["benchmark"], 1000)
+        self.assertEqual(by_percent[125]["benchmark"], 1500)
+        self.assertEqual(by_percent[110]["percent_band"], "110-119")
+        self.assertEqual(by_percent[125]["percent_band"], "120-129")
+        self.assertEqual(by_percent[110]["bonus_properties"], ["A"])
+        self.assertEqual(by_percent[125]["bonus_properties"], ["B"])
+        self.assertEqual(by_percent[110]["comparable_basis"], "percent:110-119")
+        self.assertFalse(by_percent[110]["percent_fallback"])
+
+    def test_artifact_without_percent_uses_unknown_only(self):
+        history = [sale(1000, qlt=2, ptn=15) for _ in range(5)]
+        result = self.analyze_cat(
+            [lot(700, qlt=2, ptn=15)], history, category="artefact/biochemical"
+        )
+        self.assertEqual(len(result["deals"]), 1)
+        deal = result["deals"][0]
+        self.assertIsNone(deal["artifact_percent"])
+        self.assertEqual(deal["comparable_basis"], "percent:unknown")
+        self.assertFalse(deal["percent_fallback"])
+
+    def test_missing_variant_and_restrictions_are_flagged(self):
+        result = analyze(
+            [lot(700, sell_is_blocked=1, personal_on_use=1)],
+            [sale(1000) for _ in range(5)],
+        )
+        deal = result["deals"][0]
+        self.assertTrue(deal["variant_unknown"])
+        self.assertEqual(set(deal["restrictions"]), {"sell_is_blocked", "personal_on_use"})
+
+
+class ApiHostTests(unittest.TestCase):
+    def test_uses_current_net_host(self):
+        self.assertTrue(BASE_PROD.endswith(".net"))
+        self.assertTrue(BASE_DEMO.endswith(".net"))
+
+
+class HistoryPaginationTests(unittest.TestCase):
+    class FakeClient:
+        def __init__(self, pages):
+            self.pages = pages
+            self.calls = []
+
+        def get_history(self, item, limit=200, offset=0, additional=True, cache_ttl=600):
+            self.calls.append(offset)
+            index = offset // limit
+            return {
+                "total": 10,
+                "prices": self.pages[index] if index < len(self.pages) else [],
+            }
+
+    def row(self, hours_ago):
+        return {"time": iso(NOW - timedelta(hours=hours_ago)), "price": 1000, "amount": 1}
+
+    def test_reads_pages_until_cutoff(self):
+        page1 = [self.row(1), self.row(2)]
+        page2 = [self.row(3), self.row(50)]
+        client = self.FakeClient([page1, page2])
+        prices, total = fetch_history(
+            client, "test", cutoff=CUTOFF, max_pages=5, limit=2, cache_ttl=0
+        )
+        self.assertEqual(total, 10)
+        self.assertEqual(len(prices), 4)
+        self.assertEqual(client.calls, [0, 2])
+
+    def test_duplicate_cached_page_does_not_loop(self):
+        page = [self.row(1), self.row(2)]
+        client = self.FakeClient([page, page])
+        prices, total = fetch_history(
+            client, "test", cutoff=None, max_pages=5, limit=2, cache_ttl=0
+        )
+        self.assertEqual(len(prices), 2)
+        self.assertEqual(len(client.calls), 2)
 
 
 class CacheEvictionTests(unittest.TestCase):

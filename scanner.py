@@ -29,6 +29,17 @@ ARTIFACT_RANGES = {
     5: (150.0, 15.0),
 }
 
+# Стаки разного размера торгуются по разной цене за штуку: 1 шт. обычно дороже,
+# чем 50+. Сравнивать их в одной медиане нельзя.
+STACK_BANDS = (
+    (1, 1, "1"),
+    (2, 4, "2-4"),
+    (5, 9, "5-9"),
+    (10, 19, "10-19"),
+    (20, 49, "20-49"),
+    (50, None, "50+"),
+)
+
 
 # --------------------------------------------------------------------- утилиты
 
@@ -210,6 +221,105 @@ def _pattern_label(ptn, category: str) -> str | None:
     return None
 
 
+def stack_band(amount) -> str:
+    """Возвращает диапазон размера стака для сравнимых продаж."""
+    try:
+        value = int(amount)
+    except (TypeError, ValueError):
+        value = 0
+    for low, high, label in STACK_BANDS:
+        if value >= low and (high is None or value <= high):
+            return label
+    return "50+" if value > 50 else "1"
+
+
+def stack_band_label(band: str | None, amount=None) -> str | None:
+    if band is None:
+        return None
+    if band == "1":
+        return "1 шт."
+    return f"{band} шт."
+
+
+def _stack_band_index(band: str) -> int:
+    for index, (_, _, label) in enumerate(STACK_BANDS):
+        if label == band:
+            return index
+    return 0
+
+
+def percent_band(percent, width: float = 10.0) -> str | None:
+    if not isinstance(percent, (int, float)):
+        return None
+    low = int(float(percent) // width) * int(width)
+    return f"{low}-{low + int(width) - 1}"
+
+
+def _restriction_flags(additional) -> list[str]:
+    if not isinstance(additional, dict):
+        return []
+    flags = []
+    if additional.get("sell_is_blocked"):
+        flags.append("sell_is_blocked")
+    if additional.get("personal_on_use"):
+        flags.append("personal_on_use")
+    return flags
+
+
+def _build_view(lots: list[dict], sales: list[dict]) -> dict:
+    """Считает статистику и рынок для одной сопоставимой выборки."""
+    filtered, dropped = _filter_sales_by_market(sales, lots)
+    stats = compute_stats(filtered)
+    lot_prices = [lot["unit_price"] for lot in lots if lot.get("unit_price")]
+    market = None
+    if lot_prices:
+        pairs = [(price, 1.0) for price in lot_prices]
+        market = {
+            "count": len(lot_prices),
+            "min": round(min(lot_prices), 2),
+            "p25": round(_weighted_quantile(pairs, 0.25), 2),
+            "median": round(_weighted_quantile(pairs, 0.5), 2),
+            "max": round(max(lot_prices), 2),
+        }
+    depth_map = {}
+    for lot in lots:
+        price = lot.get("unit_price")
+        if price is None:
+            continue
+        level = round(float(price), 2)
+        entry = depth_map.setdefault(level, {"unit": level, "units": 0, "lots": 0})
+        entry["units"] += int(lot.get("amount") or 0)
+        entry["lots"] += 1
+    return {
+        "stats": stats,
+        "market": market,
+        "depth": sorted(depth_map.values(), key=lambda row: row["unit"])[:50],
+        "lot_prices": lot_prices,
+        "sales": filtered,
+        "sales_filtered": dropped,
+    }
+
+
+def _nearest_band_view(views: dict[str, dict], band: str) -> tuple[dict | None, bool]:
+    """Ищет ближайший диапазон стака, если в точном нет продаж/лотов."""
+    target = _stack_band_index(band)
+    best = None
+    for distance in range(1, len(STACK_BANDS)):
+        for index in (target - distance, target + distance):
+            if 0 <= index < len(STACK_BANDS):
+                label = STACK_BANDS[index][2]
+                if label == "1":
+                    # Не подставляем одиночные продажи вместо стака.
+                    continue
+                view = views.get(label)
+                if view and (view["stats"] or view["market"]):
+                    if best is None or distance < best[0]:
+                        best = (distance, view)
+        if best is not None:
+            return best[1], True
+    return None, False
+
+
 def build_coverage(
     history: list[dict],
     cutoff: datetime,
@@ -245,10 +355,19 @@ def build_coverage(
     }
 
 
-def _reliability(volume: int) -> str:
-    if volume >= 10:
+def _reliability(volume: int, sales_count: int | None = None) -> str:
+    if sales_count is None:
+        if volume >= 10:
+            return "high"
+        if volume >= 3:
+            return "medium"
+        return "low"
+    if volume >= 10 and sales_count >= 2:
         return "high"
-    if volume >= 3:
+    if sales_count >= 2 and volume >= 3:
+        return "medium"
+    if sales_count < 2 and volume >= 20:
+        # Один крупный стак — это всё ещё одна сделка, но объём заметный.
         return "medium"
     return "low"
 
@@ -315,9 +434,22 @@ def analyze_stack_group(group_lots: list[dict], sales: list[dict], config: dict)
 
     single_sales = [row for row in sales if row["amount"] == 1]
     bulk_sales = [row for row in sales if row["amount"] > 1]
-    reference_amount = max(2, qty // 2)
-    bulk_ref = [row for row in bulk_sales if row["amount"] >= reference_amount]
-    bulk_scope = "near_qty"
+    reference_amount = qty
+    reference_band = stack_band(qty)
+    bulk_ref = [row for row in bulk_sales if stack_band(row["amount"]) == reference_band]
+    bulk_scope = "target_band"
+    if len(bulk_ref) < min_sales:
+        target_index = _stack_band_index(reference_band)
+        for distance in range(1, len(STACK_BANDS)):
+            labels = []
+            for index in (target_index - distance, target_index + distance):
+                if 0 <= index < len(STACK_BANDS):
+                    labels.append(STACK_BANDS[index][2])
+            candidate = [row for row in bulk_sales if stack_band(row["amount"]) in labels]
+            if len(candidate) >= min_sales:
+                bulk_ref = candidate
+                bulk_scope = "near_band"
+                break
     if len(bulk_ref) < min_sales:
         bulk_ref = bulk_sales
         bulk_scope = "all_bulk"
@@ -458,6 +590,7 @@ def analyze_stack_group(group_lots: list[dict], sales: list[dict], config: dict)
             "median": bulk_ask_median,
             "single_lot": bulk_single_entry,
             "reference_amount": reference_amount,
+            "reference_band": reference_band,
             "sales_scope": bulk_scope,
             "sales_count": len(bulk_ref),
             "sales_units": sum(row["amount"] for row in bulk_ref),
@@ -475,7 +608,13 @@ def _aggregate_deals(deals: list[dict]) -> list[dict]:
     """Склеивает одинаковые лоты (тот же предмет, вариант и цена) в одну возможность."""
     grouped: dict[tuple, dict] = {}
     for deal in deals:
-        key = (deal["item_id"], deal["group_key"], round(float(deal["unit_price"]), 2))
+        key = (
+            deal["item_id"],
+            deal["group_key"],
+            round(float(deal["unit_price"]), 2),
+            deal.get("amount_band"),
+            deal.get("percent_band"),
+        )
         current = grouped.get(key)
         if current is None:
             row = dict(deal)
@@ -543,7 +682,9 @@ def analyze_item(
         if filter_bonus and filter_bonus not in _bonus_properties(additional):
             continue
         key = group_key(item_id, additional, config)
-        sales_by_group[key].append({"unit": price / amount, "amount": amount, "time": ts})
+        sales_by_group[key].append(
+            {"unit": price / amount, "amount": amount, "time": ts, "additional": additional}
+        )
         group_meta.setdefault(key, additional)
         history_in_window += 1
         if last_sale is None or ts > last_sale:
@@ -600,17 +741,11 @@ def analyze_item(
     if coverage is None:
         coverage = build_coverage(history, cutoff, window_hours, api_sample_size)
 
+    group_by_stack = bool(config.get("group_by_stack", True))
+    group_by_percent = bool(config.get("group_by_percent", True))
     for key in sorted(set(sales_by_group) | set(lots_by_group)):
         raw_sales = sales_by_group.get(key, [])
         group_lots = lots_by_group.get(key, [])
-        sales, sales_filtered = _filter_sales_by_market(raw_sales, group_lots)
-        stats = compute_stats(sales)
-        additional = group_meta.get(key, {})
-        qlt = additional.get("qlt")
-        ptn = additional.get("ptn")
-        if filter_qlt is not None:
-            if not isinstance(qlt, (int, float)) or int(qlt) != filter_qlt:
-                continue
         if filter_percent or filter_bonus:
             matching_lots = []
             for lot in group_lots:
@@ -624,29 +759,65 @@ def analyze_item(
                 matching_lots.append(lot)
             group_lots = matching_lots
 
-        lot_prices = [lot["unit_price"] for lot in group_lots if lot["unit_price"]]
-        market = None
-        if lot_prices:
-            pairs = [(price, 1.0) for price in lot_prices]
-            market = {
-                "count": len(lot_prices),
-                "min": round(min(lot_prices), 2),
-                "p25": round(_weighted_quantile(pairs, 0.25), 2),
-                "median": round(_weighted_quantile(pairs, 0.5), 2),
-                "max": round(max(lot_prices), 2),
-            }
-        depth_map = {}
-        for lot in group_lots:
-            price = lot.get("unit_price")
-            if price is None:
+        additional = group_meta.get(key, {})
+        qlt = additional.get("qlt")
+        ptn = additional.get("ptn")
+        if filter_qlt is not None:
+            if not isinstance(qlt, (int, float)) or int(qlt) != filter_qlt:
                 continue
-            level = round(float(price), 2)
-            entry = depth_map.setdefault(level, {"unit": level, "units": 0, "lots": 0})
-            entry["units"] += int(lot.get("amount") or 0)
-            entry["lots"] += 1
-        depth = sorted(depth_map.values(), key=lambda row: row["unit"])[:50]
 
-        stack = analyze_stack_group(group_lots, sales, config)
+        stackable = (
+            any(int(lot.get("amount") or 0) > 1 for lot in group_lots)
+            or any(int(row.get("amount") or 0) > 1 for row in raw_sales)
+        )
+        artifact = str(category).startswith("artefact")
+        overall = _build_view(group_lots, raw_sales)
+        stats = overall["stats"]
+        market = overall["market"]
+        depth = overall["depth"]
+        sales_filtered = overall["sales_filtered"]
+
+        amount_views: dict[str, dict] = {}
+        if stackable and group_by_stack:
+            for _, _, label in STACK_BANDS:
+                band_lots = [lot for lot in group_lots if stack_band(lot.get("amount")) == label]
+                band_sales = [row for row in raw_sales if stack_band(row.get("amount")) == label]
+                if band_lots or band_sales:
+                    amount_views[label] = _build_view(band_lots, band_sales)
+
+        percent_views: dict[str, dict] = {}
+        known_view = None
+        unknown_view = None
+        if artifact and group_by_percent:
+            known_lots = []
+            known_sales = []
+            unknown_lots = []
+            unknown_sales = []
+            for lot in group_lots:
+                pct = artifact_percent(lot.get("additional"))
+                (known_lots if pct is not None else unknown_lots).append(lot)
+            for row in raw_sales:
+                pct = artifact_percent(row.get("additional"))
+                (known_sales if pct is not None else unknown_sales).append(row)
+            if known_lots or known_sales:
+                known_view = _build_view(known_lots, known_sales)
+            if unknown_lots or unknown_sales:
+                unknown_view = _build_view(unknown_lots, unknown_sales)
+            for lot in known_lots:
+                label = percent_band(artifact_percent(lot.get("additional")))
+                if label is None or label in percent_views:
+                    continue
+                band_lots = [
+                    item for item in known_lots
+                    if percent_band(artifact_percent(item.get("additional"))) == label
+                ]
+                band_sales = [
+                    row for row in known_sales
+                    if percent_band(artifact_percent(row.get("additional"))) == label
+                ]
+                percent_views[label] = _build_view(band_lots, band_sales)
+
+        stack = analyze_stack_group(group_lots, overall["sales"], config)
         if stack:
             for direction in stack["directions"]:
                 if not direction.get("flag"):
@@ -671,103 +842,175 @@ def analyze_item(
                     }
                 )
 
-        sales_base = None
-        if stats:
-            sales_base = stats.get(benchmark_mode)
-            if sales_base is None:
-                sales_base = stats["median"]
-        market_base = market["median"] if market else None
-
-        if benchmark_mode == "lots":
-            benchmark = market_base
-            eligible = bool(market)
-        elif benchmark_mode == "blend":
-            values = [value for value in (sales_base, market_base) if value]
-            benchmark = sum(values) / len(values) if values else None
-            eligible = bool(stats and market)
-        else:
-            benchmark = sales_base
-            eligible = bool(stats)
-
-        volume = stats["volume"] if stats else 0
         group_deals = 0
         best_discount = None
-        volume_ok = True if benchmark_mode == "lots" else volume >= min_volume
-        if benchmark and benchmark > 0 and eligible and volume_ok:
-            for lot in group_lots:
-                unit = lot["unit_price"]
-                if unit is None or unit <= 0:
-                    continue
-                if min_price and unit < min_price:
-                    continue
-                if max_price and unit > max_price:
-                    continue
-                base_for_lot = benchmark
-                market_cap = None
-                capped = False
-                if cap_by_market and benchmark_mode in ("mean", "median", "trimmed"):
-                    market_cap = _market_cap(lot_prices, unit)
-                    if market_cap and market_cap < base_for_lot:
-                        base_for_lot = market_cap
-                        capped = True
-                discount = 1.0 - unit / base_for_lot
-                if discount < threshold - 1e-9:
-                    continue
-                net_unit = base_for_lot * (1.0 - commission) - unit
-                if net_unit <= 0:
-                    continue
-                total_net = net_unit * lot["amount"]
-                end = lot["end_time"]
-                time_left_min = int((end - now).total_seconds() // 60) if end else None
-                deals.append(
-                    {
-                        "item_id": item_id,
-                        "name": name,
-                        "category": category,
-                        "group_key": key,
-                        "qlt": int(qlt) if isinstance(qlt, (int, float)) else None,
-                        "ptn": int(ptn) if isinstance(ptn, (int, float)) else None,
-                        "qlt_label": _quality_label(qlt),
-                        "ptn_label": _pattern_label(ptn, category),
-                        "artifact_percent": artifact_percent(additional),
-                        "bonus_properties": _bonus_properties(additional),
-                        "unit_price": round(unit, 2),
-                        "buyout": lot["buyout"],
-                        "current_price": lot["current"],
-                        "start_price": lot["start_price"],
-                        "amount": lot["amount"],
-                        "benchmark": round(base_for_lot, 2),
-                        "benchmark_mode": benchmark_mode,
-                        "sales_base": round(sales_base, 2) if sales_base else None,
-                        "market_cap": round(market_cap, 2) if market_cap else None,
-                        "capped": capped,
-                        "mean": stats["mean"] if stats else None,
-                        "median": stats["median"] if stats else None,
-                        "p25": stats["p25"] if stats else None,
-                        "p75": stats["p75"] if stats else None,
-                        "market_min": market["min"] if market else None,
-                        "market_p25": market["p25"] if market else None,
-                        "market_median": market["median"] if market else None,
-                        "market_lots": market["count"] if market else 0,
-                        "discount_pct": round(discount * 100, 1),
-                        "commission_pct": round(commission * 100, 1),
-                        "gross_unit": round(base_for_lot - unit, 2),
-                        "net_unit": round(net_unit, 2),
-                        "total_net": round(total_net, 2),
-                        "total_cost": round(unit * lot["amount"], 2),
-                        "volume": volume,
-                        "sales_count": stats["sales_count"] if stats else 0,
-                        "sales_filtered": sales_filtered,
-                        "sales_per_day": round(volume / days, 2),
-                        "reliability": _reliability(volume),
-                        "time_left_min": time_left_min,
-                        "end_time": end.isoformat() if end else None,
-                        "additional": additional,
-                        "coverage": coverage,
-                    }
-                )
-                group_deals += 1
-                best_discount = discount if best_discount is None else max(best_discount, discount)
+        group_sales_base = None
+        if stats:
+            group_sales_base = stats.get(benchmark_mode) or stats["median"]
+        variant_category = str(category).startswith(("artefact", "weapon", "armor"))
+        for lot in group_lots:
+            unit = lot["unit_price"]
+            if unit is None or unit <= 0:
+                continue
+            if min_price and unit < min_price:
+                continue
+            if max_price and unit > max_price:
+                continue
+
+            lot_additional = lot.get("additional") if isinstance(lot.get("additional"), dict) else {}
+            amount_band = stack_band(lot.get("amount")) if stackable else None
+            lot_percent = artifact_percent(lot_additional) if artifact else None
+            lot_percent_band = percent_band(lot_percent) if lot_percent is not None else None
+
+            view = overall
+            comparable_basis = "overall"
+            amount_fallback = False
+            percent_fallback = False
+
+            if artifact and group_by_percent:
+                if lot_percent is not None:
+                    candidate = percent_views.get(lot_percent_band)
+                    if candidate and (candidate["stats"] or (benchmark_mode == "lots" and candidate["market"])):
+                        view = candidate
+                        comparable_basis = f"percent:{lot_percent_band}"
+                    elif known_view and (known_view["stats"] or (benchmark_mode == "lots" and known_view["market"])):
+                        view = known_view
+                        comparable_basis = "percent:known"
+                        percent_fallback = True
+                    else:
+                        continue
+                else:
+                    if unknown_view and (unknown_view["stats"] or (benchmark_mode == "lots" and unknown_view["market"])):
+                        view = unknown_view
+                        comparable_basis = "percent:unknown"
+                    else:
+                        continue
+            elif stackable and group_by_stack:
+                candidate = amount_views.get(amount_band)
+                if candidate and (candidate["stats"] or (benchmark_mode == "lots" and candidate["market"])):
+                    view = candidate
+                    comparable_basis = f"amount:{amount_band}"
+                else:
+                    candidate, _ = _nearest_band_view(amount_views, amount_band)
+                    if amount_band == "1":
+                        # Для одиночного лота нет сравнимых одиночных продаж:
+                        # не подставляем стаки, даже ближайшие.
+                        continue
+                    if candidate and (candidate["stats"] or (benchmark_mode == "lots" and candidate["market"])):
+                        view = candidate
+                        comparable_basis = f"amount-near:{amount_band}"
+                        amount_fallback = True
+                    else:
+                        # Не сравниваем стак с одиночными продажами: это и есть
+                        # главный источник ложных скидок.
+                        continue
+
+            view_stats = view["stats"]
+            view_market = view["market"]
+            view_prices = view["lot_prices"]
+
+            sales_base = None
+            if view_stats:
+                sales_base = view_stats.get(benchmark_mode)
+                if sales_base is None:
+                    sales_base = view_stats["median"]
+            market_base = view_market["median"] if view_market else None
+
+            if benchmark_mode == "lots":
+                benchmark = market_base
+                eligible = bool(view_market)
+            elif benchmark_mode == "blend":
+                values = [value for value in (sales_base, market_base) if value]
+                benchmark = sum(values) / len(values) if values else None
+                eligible = bool(view_stats and view_market)
+            else:
+                benchmark = sales_base
+                eligible = bool(view_stats)
+
+            volume = view_stats["volume"] if view_stats else 0
+            volume_ok = True if benchmark_mode == "lots" else volume >= min_volume
+            if not (benchmark and benchmark > 0 and eligible and volume_ok):
+                continue
+
+            base_for_lot = benchmark
+            market_cap = None
+            capped = False
+            if cap_by_market and benchmark_mode in ("mean", "median", "trimmed"):
+                market_cap = _market_cap(view_prices, unit)
+                if market_cap and market_cap < base_for_lot:
+                    base_for_lot = market_cap
+                    capped = True
+            discount = 1.0 - unit / base_for_lot
+            if discount < threshold - 1e-9:
+                continue
+            net_unit = base_for_lot * (1.0 - commission) - unit
+            if net_unit <= 0:
+                continue
+            total_net = net_unit * lot["amount"]
+            end = lot["end_time"]
+            time_left_min = int((end - now).total_seconds() // 60) if end else None
+            variant_unknown = bool(
+                variant_category
+                and config.get("group_by_qlt", True)
+                and not isinstance(lot_additional.get("qlt"), (int, float))
+            )
+            deals.append(
+                {
+                    "item_id": item_id,
+                    "name": name,
+                    "category": category,
+                    "group_key": key,
+                    "qlt": int(qlt) if isinstance(qlt, (int, float)) else None,
+                    "ptn": int(ptn) if isinstance(ptn, (int, float)) else None,
+                    "qlt_label": _quality_label(qlt),
+                    "ptn_label": _pattern_label(ptn, category),
+                    "artifact_percent": lot_percent,
+                    "bonus_properties": _bonus_properties(lot_additional),
+                    "unit_price": round(unit, 2),
+                    "buyout": lot["buyout"],
+                    "current_price": lot["current"],
+                    "start_price": lot["start_price"],
+                    "amount": lot["amount"],
+                    "amount_band": amount_band,
+                    "amount_band_label": stack_band_label(amount_band),
+                    "percent_band": lot_percent_band,
+                    "comparable_basis": comparable_basis,
+                    "amount_fallback": amount_fallback,
+                    "percent_fallback": percent_fallback,
+                    "variant_unknown": variant_unknown,
+                    "restrictions": _restriction_flags(lot_additional),
+                    "benchmark": round(base_for_lot, 2),
+                    "benchmark_mode": benchmark_mode,
+                    "sales_base": round(sales_base, 2) if sales_base else None,
+                    "market_cap": round(market_cap, 2) if market_cap else None,
+                    "capped": capped,
+                    "mean": view_stats["mean"] if view_stats else None,
+                    "median": view_stats["median"] if view_stats else None,
+                    "p25": view_stats["p25"] if view_stats else None,
+                    "p75": view_stats["p75"] if view_stats else None,
+                    "market_min": view_market["min"] if view_market else None,
+                    "market_p25": view_market["p25"] if view_market else None,
+                    "market_median": view_market["median"] if view_market else None,
+                    "market_lots": view_market["count"] if view_market else 0,
+                    "discount_pct": round(discount * 100, 1),
+                    "commission_pct": round(commission * 100, 1),
+                    "gross_unit": round(base_for_lot - unit, 2),
+                    "net_unit": round(net_unit, 2),
+                    "total_net": round(total_net, 2),
+                    "total_cost": round(unit * lot["amount"], 2),
+                    "volume": volume,
+                    "sales_count": view_stats["sales_count"] if view_stats else 0,
+                    "sales_filtered": view["sales_filtered"],
+                    "sales_per_day": round(volume / days, 2),
+                    "reliability": _reliability(volume, view_stats["sales_count"] if view_stats else 0),
+                    "time_left_min": time_left_min,
+                    "end_time": end.isoformat() if end else None,
+                    "additional": lot_additional,
+                    "coverage": coverage,
+                }
+            )
+            group_deals += 1
+            best_discount = discount if best_discount is None else max(best_discount, discount)
 
         groups_out.append(
             {
@@ -782,13 +1025,13 @@ def analyze_item(
                 "sales_filtered": sales_filtered,
                 "market": market,
                 "depth": depth,
-                "sales_base": round(sales_base, 2) if sales_base else None,
+                "sales_base": round(group_sales_base, 2) if group_sales_base else None,
                 "market_p25": market["p25"] if market else None,
                 "stack": stack,
                 "lots": len(group_lots),
                 "buyout_lots": sum(1 for lot in group_lots if lot["buyout"] > 0),
                 "deals": group_deals,
-                "min_lot_unit": round(min(lot_prices), 2) if lot_prices else None,
+                "min_lot_unit": round(min(overall["lot_prices"]), 2) if overall["lot_prices"] else None,
                 "best_discount_pct": round(best_discount * 100, 1) if best_discount is not None else None,
             }
         )
@@ -829,11 +1072,48 @@ def analyze_item(
 # --------------------------------------------------------------------- сканер
 
 
-def fetch_history(client, item_id: str, limit: int = 200, cache_ttl: float = 600):
-    """API отдаёт только последние 200 продаж; offset/limit фактически игнорируются."""
-    data = client.get_history(item_id, limit=limit, offset=0, additional=True, cache_ttl=cache_ttl)
-    prices = data.get("prices") or []
-    total = int(data.get("total") or 0)
+def fetch_history(
+    client,
+    item_id: str,
+    cutoff: datetime | None = None,
+    max_pages: int = 1,
+    limit: int = 200,
+    cache_ttl: float = 600,
+):
+    """Читает историю с пагинацией .net, пока не покроет окно или max_pages.
+
+    На старом .com Cloudflare игнорирует offset, поэтому вторая страница
+    возвращает те же строки. Дубликаты отбрасываем и останавливаемся.
+    """
+    prices: list[dict] = []
+    total = 0
+    seen: set[tuple] = set()
+    for page in range(max(1, int(max_pages))):
+        data = client.get_history(
+            item_id,
+            limit=limit,
+            offset=page * limit,
+            additional=True,
+            cache_ttl=cache_ttl,
+        )
+        chunk = data.get("prices") or []
+        total = int(data.get("total") or total)
+        new_count = 0
+        oldest = None
+        for row in chunk:
+            key = (row.get("time"), row.get("price"), row.get("amount"))
+            ts = parse_dt(row.get("time"))
+            if ts is not None and (oldest is None or ts < oldest):
+                oldest = ts
+            if key in seen:
+                continue
+            seen.add(key)
+            prices.append(row)
+            new_count += 1
+        if len(chunk) < limit or new_count == 0:
+            break
+        if cutoff is not None and oldest is not None and oldest <= cutoff:
+            break
     return prices, total
 
 
@@ -908,7 +1188,13 @@ def _scan_one(
         history_total = 0
         history_skipped = not has_buyout
         if has_buyout:
-            fetched, history_total = fetch_history(client, item_id, cache_ttl=history_ttl)
+            fetched, history_total = fetch_history(
+                client,
+                item_id,
+                cutoff=cutoff,
+                max_pages=max(1, int(config.get("history_pages", 1))),
+                cache_ttl=history_ttl,
+            )
             raw_sample = len(fetched)
             # Не храним в SQLite продажи старше горизонта хранения: для неликвидных
             # предметов API отдаёт «последние 200 продаж» из 2021 года, и они

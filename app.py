@@ -90,12 +90,15 @@ DEFAULT_CONFIG = {
     "min_price": 5000,
     "max_price": 0,
     "min_profit": 5000,
-    "lots_pages": 1,
+    "lots_pages": 2,
+    "history_pages": 5,
     "group_by_qlt": True,
     "group_by_ptn": True,
+    "group_by_stack": True,
+    "group_by_percent": True,
     "auto_scan": True,
     "scan_interval_min": 5,
-    "scan_workers": 8,
+    "scan_workers": 10,
     "history_ttl_min": 30,
     "watchlist": ["1kdg", "04yr", "4lml", "g34p", "5rd1"],
     "item_rules": {},
@@ -225,18 +228,18 @@ class Store:
         out["min_price"] = max(0, int(_clamp(out.get("min_price"), 0, 10**12, 5000)))
         out["max_price"] = max(0, int(_clamp(out.get("max_price"), 0, 10**12, 0)))
         out["min_profit"] = int(_clamp(out.get("min_profit"), 0, 10**12, 5000))
-        out["lots_pages"] = int(_clamp(out.get("lots_pages"), 1, 5, 1))
+        out["lots_pages"] = int(_clamp(out.get("lots_pages"), 1, 10, 2))
+        out["history_pages"] = int(_clamp(out.get("history_pages"), 1, 10, 5))
         out["scan_interval_min"] = int(_clamp(out.get("scan_interval_min"), 1, 180, 5))
-        out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 8, 8))
+        out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 16, 10))
         out["history_ttl_min"] = int(_clamp(out.get("history_ttl_min"), 1, 1440, 30))
         out["benchmark"] = str(out.get("benchmark", "median"))
         if out["benchmark"] not in ("mean", "median", "trimmed", "lots", "blend"):
             out["benchmark"] = "median"
         out["cap_by_market"] = bool(out.get("cap_by_market", True))
-        out.pop("history_pages", None)
         out["client_id"] = str(out.get("client_id") or "").strip()[:64]
         out["client_secret"] = str(out.get("client_secret") or "").strip()[:256]
-        for key in ("demo", "auto_scan", "group_by_qlt", "group_by_ptn"):
+        for key in ("demo", "auto_scan", "group_by_qlt", "group_by_ptn", "group_by_stack", "group_by_percent"):
             out[key] = bool(out.get(key))
         out["watchlist"] = _clean_watchlist(out.get("watchlist"))
         out["item_rules"] = _clean_item_rules(out.get("item_rules"))
@@ -274,6 +277,7 @@ class Store:
                 "max_price",
                 "min_profit",
                 "lots_pages",
+                "history_pages",
                 "scan_interval_min",
                 "scan_workers",
                 "history_ttl_min",
@@ -281,6 +285,8 @@ class Store:
                 "auto_scan",
                 "group_by_qlt",
                 "group_by_ptn",
+                "group_by_stack",
+                "group_by_percent",
                 "client_id",
                 "item_rules",
             ):
@@ -734,6 +740,8 @@ def _csv_bytes(results: dict) -> bytes:
             "Категория",
             "Качество",
             "Паттерн/уровень",
+            "Процент",
+            "Стак",
             "Цена за шт.",
             "База за шт.",
             "Профит за шт.",
@@ -755,6 +763,8 @@ def _csv_bytes(results: dict) -> bytes:
                 deal.get("category"),
                 deal.get("qlt_label") or "",
                 deal.get("ptn_label") or "",
+                deal.get("artifact_percent") if deal.get("artifact_percent") is not None else "",
+                deal.get("amount_band_label") or "",
                 round(deal.get("unit_price") or 0),
                 round(deal.get("benchmark") or 0),
                 round(deal.get("net_unit") or 0),
@@ -823,7 +833,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.1"
+    server_version = "SZAUCTRACKER/1.2"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
