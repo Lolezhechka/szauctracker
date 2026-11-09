@@ -606,6 +606,11 @@ select.input { padding-right: 28px; }
 .analytics-stat b { display: block; font-family: var(--mono); font-size: 14px; font-weight: 500; margin-top: 2px; }
 
 .tag.pct { color: var(--accent); border-color: rgba(168, 224, 95, 0.35); }
+.score { display: inline-block; min-width: 32px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--panel-2); color: var(--muted); }
+.score.great { background: var(--accent); color: #0b1406; }
+.score.good { background: rgba(168, 224, 95, 0.16); color: var(--accent); }
+.score.mid { background: rgba(232, 169, 74, 0.14); color: var(--orange); }
+.score.low { background: rgba(226, 103, 90, 0.14); color: var(--red); }
 .tag.warn { color: var(--orange); border-color: rgba(232, 169, 74, 0.4); }
 .tag.bad { color: var(--red); border-color: rgba(226, 103, 90, 0.4); }
 

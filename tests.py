@@ -1003,6 +1003,60 @@ class ComparableBandTests(unittest.TestCase):
         self.assertEqual(set(deal["restrictions"]), {"sell_is_blocked", "personal_on_use"})
 
 
+class AdaptiveScoreTests(unittest.TestCase):
+    def test_adaptive_benchmark_penalizes_falling_market(self):
+        history = (
+            [sale(1000, hours_ago=2) for _ in range(5)]
+            + [sale(1200, hours_ago=30) for _ in range(5)]
+        )
+        median = analyze([lot(950)], history, benchmark="median")
+        self.assertEqual(len(median["deals"]), 1)
+        self.assertEqual(median["deals"][0]["benchmark"], 1100)
+        adaptive = analyze([lot(950)], history, benchmark="adaptive")
+        self.assertEqual(adaptive["deals"], [])
+        group = adaptive["groups"][0]
+        self.assertLess(group["stats"]["median"] if "stats" in group else 1100, 1200)
+        # Поля тренда и адаптивной базы доступны даже без сделки.
+        no_deal = analyze([lot(1200)], history, benchmark="adaptive")
+        self.assertIsNone(no_deal["deals"][0] if no_deal["deals"] else None)
+
+    def test_trend_and_sell_through_fields(self):
+        history = [
+            sale(1000, hours_ago=2) for _ in range(3)
+        ] + [
+            sale(1200, hours_ago=30) for _ in range(3)
+        ]
+        result = analyze([lot(700), lot(800), lot(900)], history)
+        deal = result["deals"][0]
+        self.assertEqual(deal["trend_pct"], -16.7)
+        self.assertIsNotNone(deal["volatility_pct"])
+        self.assertEqual(deal["supply_units"], 3)
+        self.assertEqual(deal["queue_units"], 0)
+        self.assertGreater(deal["sell_through_pct"], 0)
+        self.assertIsNotNone(deal["expected_days"])
+        self.assertGreater(deal["score"], 0)
+        self.assertEqual(set(deal["score_parts"]), {"profit", "discount", "liquidity", "reliability", "competition", "trend"})
+        self.assertIn(deal["score_label"], {"отличная", "хорошая", "средняя", "рискованная"})
+
+    def test_queue_and_undercut_for_expensive_lot(self):
+        history = [sale(1000, hours_ago=2) for _ in range(5)]
+        result = analyze([lot(700), lot(800), lot(850), lot(950)], history, cap_by_market=False)
+        deals = {deal["unit_price"]: deal for deal in result["deals"]}
+        expensive = deals[850.0]
+        self.assertEqual(expensive["queue_units"], 2)
+        self.assertEqual(expensive["queue_lots"], 2)
+        self.assertEqual(expensive["undercut_price"], 940.5)
+        self.assertLess(deals[700.0]["score"], 100)
+
+    def test_store_accepts_adaptive_benchmark(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "config.json")
+            store.update({"benchmark": "adaptive"})
+            self.assertEqual(store.snapshot()["benchmark"], "adaptive")
+            store.update({"benchmark": "nonsense"})
+            self.assertEqual(store.snapshot()["benchmark"], "adaptive")
+
+
 class ApiHostTests(unittest.TestCase):
     def test_uses_current_net_host(self):
         self.assertTrue(BASE_PROD.endswith(".net"))

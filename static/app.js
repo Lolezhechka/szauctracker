@@ -70,6 +70,7 @@ const STATUS_LABELS = {
   stopped: "остановлено",
 };
 const BENCH_LABELS = {
+  adaptive: "адаптивная (свежие + тренд)",
   mean: "средняя продаж",
   median: "медиана продаж",
   trimmed: "усечённая средняя продаж",
@@ -623,7 +624,7 @@ function renderCalcHint() {
     const hours = r.coverage_min_hours;
     hint.classList.remove("hidden");
     hint.textContent =
-      `⚠ API отдаёт только 200 последних продаж — для части предметов это ${hours} ч вместо ${r.days} дн. ` +
+      `⚠ Даже нескольких страниц истории не хватает на ${r.days} дн. — для части предметов покрытие всего ${hours} ч. ` +
       `Приложение сохраняет историю локально: оставьте его запущенным, и средняя уточнится до полного окна.`;
   } else {
     hint.classList.add("hidden");
@@ -674,6 +675,7 @@ function filteredDeals() {
   const minReliability = $("#dealMinReliability").value;
   const maxTime = Number($("#dealMaxTime").value || 0);
   const onlyLiquid = $("#onlyLiquid").checked;
+  const budget = Number($("#dealBudget").value || 0);
   const reliabilityRank = { low: 0, medium: 1, high: 2 };
 
   let rows = (state.results.deals || []).filter((deal) => {
@@ -688,6 +690,7 @@ function filteredDeals() {
     if (onlyLiquid && (deal.volume || 0) < 3) return false;
     if (minReliability && (reliabilityRank[deal.reliability || "low"] ?? 0) < reliabilityRank[minReliability]) return false;
     if (maxTime && (deal.time_left_min ?? Number.POSITIVE_INFINITY) > maxTime * 60) return false;
+    if (budget && (deal.total_cost || 0) > budget) return false;
     if (query) {
       const haystack = [deal.name, deal.item_id, deal.qlt_label, deal.ptn_label, deal.category]
         .filter(Boolean).join(" ").toLowerCase();
@@ -697,6 +700,7 @@ function filteredDeals() {
   });
 
   const sorters = {
+    score: (a, b) => (b.score ?? 0) - (a.score ?? 0) || b.total_net - a.total_net,
     discount: (a, b) => b.discount_pct - a.discount_pct || b.total_net - a.total_net,
     profit: (a, b) => b.net_unit - a.net_unit || b.discount_pct - a.discount_pct,
     total: (a, b) => b.total_net - a.total_net,
@@ -705,6 +709,14 @@ function filteredDeals() {
   };
   rows.sort(sorters[$("#dealSort").value] || sorters.total);
   return rows;
+}
+
+function scoreClass(score) {
+  if (score == null) return "";
+  if (score >= 80) return "great";
+  if (score >= 60) return "good";
+  if (score >= 40) return "mid";
+  return "low";
 }
 
 function comparableLabel(basis) {
@@ -768,6 +780,7 @@ function dealRowHtml(deal, index) {
       <td class="num stack-qty">${money(deal.amount)}${deal.lots_count > 1 ? `<small>${deal.lots_count} лот(ов)</small>` : ""}</td>
       <td class="num profit total">+${money(deal.total_net)}</td>
       <td class="num disc${hot}" title="Насколько цена лота ниже базы">${pct(deal.discount_pct)}</td>
+      <td class="num"><span class="score ${scoreClass(deal.score)}" title="Рейтинг ${esc(deal.score_label || "")}: прибыль, скидка, ликвидность, риск">${deal.score ?? "—"}</span></td>
       <td class="num profit">+${moneyFine(deal.net_unit)}</td>
       <td class="num">${moneyFine(deal.benchmark)}</td>
       <td class="num market" title="Активные лоты того же варианта: минимум–25-й перцентиль">${market}</td>
@@ -776,7 +789,7 @@ function dealRowHtml(deal, index) {
       <td><button type="button" class="btn icon" data-copy="${esc(deal.name)}" title="Скопировать название для поиска в игре">⧉</button></td>
     </tr>
     <tr class="details-row hidden" data-d="${index}">
-      <td colspan="12">
+      <td colspan="13">
         <div class="details-grid">
           <div class="detail-item">Средняя продаж<b>${moneyFine(deal.mean)}</b></div>
           <div class="detail-item">Медиана продаж<b>${moneyFine(deal.median)}</b></div>
@@ -821,6 +834,19 @@ function dealRowHtml(deal, index) {
 function renderDeals() {
   const rows = filteredDeals();
   state.visibleDeals = rows;
+  const budget = Number($("#dealBudget").value || 0);
+  const budgetHint = $("#budgetHint");
+  if (budgetHint) {
+    if (budget > 0) {
+      const invested = rows.reduce((sum, deal) => sum + (deal.total_cost || 0), 0);
+      const profit = rows.reduce((sum, deal) => sum + (deal.total_net || 0), 0);
+      budgetHint.textContent = rows.length
+        ? `Под бюджет ${money(budget)}: ${rows.length} сдел(ок) · вложить ${money(invested)} · прибыль ${money(profit)}`
+        : `Под бюджет ${money(budget)} ничего не подходит.`;
+    } else {
+      budgetHint.textContent = "";
+    }
+  }
   const body = $("#dealsBody");
   const table = body.closest(".table-wrap");
   const empty = $("#dealsEmpty");
@@ -863,9 +889,9 @@ function renderNoDeals() {
 }
 
 function bindDealsControls() {
-  for (const id of ["dealSearch", "dealCategory", "dealMinDiscount", "dealMinProfit", "dealMinPrice", "dealMaxLots", "dealMinQlt", "dealMinPercent", "dealBonus", "dealSort", "onlyLiquid"]) {
+  for (const id of ["dealSearch", "dealCategory", "dealMinDiscount", "dealMinProfit", "dealMinPrice", "dealMaxLots", "dealMinQlt", "dealMinPercent", "dealBonus", "dealMinReliability", "dealMaxTime", "dealBudget", "dealSort", "onlyLiquid"]) {
     const element = document.getElementById(id);
-    element.addEventListener(id === "dealSearch" ? "input" : "change", renderDeals);
+    if (element) element.addEventListener(id === "dealSearch" || id === "dealBudget" ? "input" : "change", renderDeals);
   }
   $("#dealsBody").addEventListener("click", async (event) => {
     const chartButton = event.target.closest("[data-analytics]");

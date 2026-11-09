@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
     "days": 2,
     "threshold_pct": 10,
     "commission_pct": 5,
-    "benchmark": "median",
+    "benchmark": "adaptive",
     "cap_by_market": True,
     "stack_qty": 100,
     "stack_threshold_pct": 10,
@@ -234,8 +234,8 @@ class Store:
         out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 16, 10))
         out["history_ttl_min"] = int(_clamp(out.get("history_ttl_min"), 1, 1440, 30))
         out["benchmark"] = str(out.get("benchmark", "median"))
-        if out["benchmark"] not in ("mean", "median", "trimmed", "lots", "blend"):
-            out["benchmark"] = "median"
+        if out["benchmark"] not in ("mean", "median", "trimmed", "lots", "blend", "adaptive"):
+            out["benchmark"] = "adaptive"
         out["cap_by_market"] = bool(out.get("cap_by_market", True))
         out["client_id"] = str(out.get("client_id") or "").strip()[:64]
         out["client_secret"] = str(out.get("client_secret") or "").strip()[:256]
@@ -735,6 +735,7 @@ def _csv_bytes(results: dict) -> bytes:
     writer.writerow(
         [
             "Скидка, %",
+            "Оценка",
             "Предмет",
             "ID",
             "Категория",
@@ -742,6 +743,8 @@ def _csv_bytes(results: dict) -> bytes:
             "Паттерн/уровень",
             "Процент",
             "Стак",
+            "Тренд, %",
+            "Дней до продажи",
             "Цена за шт.",
             "База за шт.",
             "Профит за шт.",
@@ -758,6 +761,7 @@ def _csv_bytes(results: dict) -> bytes:
         writer.writerow(
             [
                 deal.get("discount_pct"),
+                deal.get("score"),
                 deal.get("name"),
                 deal.get("item_id"),
                 deal.get("category"),
@@ -765,6 +769,8 @@ def _csv_bytes(results: dict) -> bytes:
                 deal.get("ptn_label") or "",
                 deal.get("artifact_percent") if deal.get("artifact_percent") is not None else "",
                 deal.get("amount_band_label") or "",
+                deal.get("trend_pct") if deal.get("trend_pct") is not None else "",
+                deal.get("expected_days") if deal.get("expected_days") is not None else "",
                 round(deal.get("unit_price") or 0),
                 round(deal.get("benchmark") or 0),
                 round(deal.get("net_unit") or 0),
@@ -833,7 +839,7 @@ def _csv_stacks_bytes(results: dict) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.2"
+    server_version = "SZAUCTRACKER/1.3"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы

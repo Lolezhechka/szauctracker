@@ -266,8 +266,8 @@ def _restriction_flags(additional) -> list[str]:
     return flags
 
 
-def _build_view(lots: list[dict], sales: list[dict]) -> dict:
-    """Считает статистику и рынок для одной сопоставимой выборки."""
+def _build_view(lots: list[dict], sales: list[dict], now: datetime | None = None, days: float | None = None) -> dict:
+    """Считает статистику, рынок и адаптивные метрики для одной выборки."""
     filtered, dropped = _filter_sales_by_market(sales, lots)
     stats = compute_stats(filtered)
     lot_prices = [lot["unit_price"] for lot in lots if lot.get("unit_price")]
@@ -290,13 +290,68 @@ def _build_view(lots: list[dict], sales: list[dict]) -> dict:
         entry = depth_map.setdefault(level, {"unit": level, "units": 0, "lots": 0})
         entry["units"] += int(lot.get("amount") or 0)
         entry["lots"] += 1
+    recent_stats = None
+    trend_pct = None
+    volatility_pct = None
+    adaptive = None
+    conservative = None
+    optimistic = None
+    sell_through_pct = None
+    days_to_clear = None
+    supply_units = sum(int(lot.get("amount") or 0) for lot in lots if int(lot.get("buyout") or 0) > 0)
+    supply_lots = sum(1 for lot in lots if int(lot.get("buyout") or 0) > 0)
+    if stats:
+        median = float(stats["median"])
+        if median > 0:
+            volatility_pct = round((stats["p75"] - stats["p25"]) / median * 100.0, 1)
+        if now is not None and days:
+            recent_hours = min(24.0, max(3.0, float(days) * 12.0))
+            recent_cutoff = now - timedelta(hours=recent_hours)
+            recent = [row for row in filtered if row.get("time") is not None and row["time"] >= recent_cutoff]
+            older = [row for row in filtered if row.get("time") is not None and row["time"] < recent_cutoff]
+            recent_stats = compute_stats(recent)
+            older_stats = compute_stats(older)
+            if (
+                recent_stats and older_stats
+                and recent_stats["sales_count"] >= 2 and older_stats["sales_count"] >= 2
+                and older_stats["median"] > 0
+            ):
+                trend_pct = round(
+                    (recent_stats["median"] - older_stats["median"]) / older_stats["median"] * 100.0, 1
+                )
+        adaptive = median
+        if recent_stats and recent_stats["median"] and recent_stats["volume"] >= 3:
+            weight = min(0.8, recent_stats["volume"] / (recent_stats["volume"] + 10.0))
+            adaptive = weight * recent_stats["median"] + (1.0 - weight) * median
+        if trend_pct is not None and trend_pct < 0:
+            adaptive *= max(0.85, 1.0 + (trend_pct / 100.0) * 0.4)
+        if volatility_pct is not None and volatility_pct > 60:
+            adaptive *= 0.98
+        conservative = min(adaptive, stats["p25"])
+        optimistic = max(adaptive, stats["p75"])
+        if days and supply_units > 0:
+            sales_per_day = stats["volume"] / float(days)
+            sell_through_pct = round(sales_per_day / supply_units * 100.0, 1)
+            if sales_per_day > 0:
+                days_to_clear = round(supply_units / sales_per_day, 1)
     return {
         "stats": stats,
         "market": market,
         "depth": sorted(depth_map.values(), key=lambda row: row["unit"])[:50],
         "lot_prices": lot_prices,
+        "lots": lots,
         "sales": filtered,
         "sales_filtered": dropped,
+        "recent_stats": recent_stats,
+        "trend_pct": trend_pct,
+        "volatility_pct": volatility_pct,
+        "adaptive": round(adaptive, 2) if adaptive else None,
+        "conservative": round(conservative, 2) if conservative else None,
+        "optimistic": round(optimistic, 2) if optimistic else None,
+        "supply_units": supply_units,
+        "supply_lots": supply_lots,
+        "sell_through_pct": sell_through_pct,
+        "days_to_clear": days_to_clear,
     }
 
 
@@ -370,6 +425,71 @@ def _reliability(volume: int, sales_count: int | None = None) -> str:
         # Один крупный стак — это всё ещё одна сделка, но объём заметный.
         return "medium"
     return "low"
+
+
+def _score_part(value: float) -> float:
+    return round(max(0.0, min(100.0, float(value))), 1)
+
+
+def opportunity_score(
+    *,
+    discount_pct: float,
+    net_margin_pct: float,
+    sales_per_day: float,
+    sell_through_pct: float | None,
+    queue_units: int,
+    trend_pct: float | None,
+    reliability: str,
+    restricted: bool,
+    variant_unknown: bool,
+    fallback: bool,
+    capped: bool,
+) -> tuple[float, str, dict]:
+    """Прозрачный рейтинг 0–100: прибыль, скидка, ликвидность, риск."""
+    profit_score = _score_part(net_margin_pct / 30.0 * 100.0)
+    discount_score = _score_part(discount_pct / 30.0 * 100.0)
+    if sell_through_pct is not None:
+        liquidity_score = _score_part(sell_through_pct * 4.0)
+    else:
+        liquidity_score = _score_part(sales_per_day * 20.0)
+    reliability_score = {"high": 100.0, "medium": 60.0, "low": 25.0}.get(reliability, 25.0)
+    if sales_per_day > 0:
+        competition_score = _score_part(
+            100.0 * sales_per_day / (sales_per_day + max(0, int(queue_units)))
+        )
+    else:
+        competition_score = 0.0
+    trend_score = _score_part(50.0 + (trend_pct or 0.0) * 2.0)
+    score = (
+        profit_score * 0.25
+        + discount_score * 0.20
+        + liquidity_score * 0.20
+        + reliability_score * 0.15
+        + competition_score * 0.10
+        + trend_score * 0.10
+    )
+    score -= 12.0 if restricted else 0.0
+    score -= 8.0 if variant_unknown else 0.0
+    score -= 4.0 if fallback else 0.0
+    score -= 3.0 if capped else 0.0
+    score = _score_part(score)
+    if score >= 80:
+        label = "отличная"
+    elif score >= 60:
+        label = "хорошая"
+    elif score >= 40:
+        label = "средняя"
+    else:
+        label = "рискованная"
+    parts = {
+        "profit": profit_score,
+        "discount": discount_score,
+        "liquidity": liquidity_score,
+        "reliability": reliability_score,
+        "competition": competition_score,
+        "trend": trend_score,
+    }
+    return score, label, parts
 
 
 # --------------------------------------------------------------------- стаки
@@ -771,7 +891,7 @@ def analyze_item(
             or any(int(row.get("amount") or 0) > 1 for row in raw_sales)
         )
         artifact = str(category).startswith("artefact")
-        overall = _build_view(group_lots, raw_sales)
+        overall = _build_view(group_lots, raw_sales, now, days)
         stats = overall["stats"]
         market = overall["market"]
         depth = overall["depth"]
@@ -783,7 +903,7 @@ def analyze_item(
                 band_lots = [lot for lot in group_lots if stack_band(lot.get("amount")) == label]
                 band_sales = [row for row in raw_sales if stack_band(row.get("amount")) == label]
                 if band_lots or band_sales:
-                    amount_views[label] = _build_view(band_lots, band_sales)
+                    amount_views[label] = _build_view(band_lots, band_sales, now, days)
 
         percent_views: dict[str, dict] = {}
         known_view = None
@@ -800,9 +920,9 @@ def analyze_item(
                 pct = artifact_percent(row.get("additional"))
                 (known_sales if pct is not None else unknown_sales).append(row)
             if known_lots or known_sales:
-                known_view = _build_view(known_lots, known_sales)
+                known_view = _build_view(known_lots, known_sales, now, days)
             if unknown_lots or unknown_sales:
-                unknown_view = _build_view(unknown_lots, unknown_sales)
+                unknown_view = _build_view(unknown_lots, unknown_sales, now, days)
             for lot in known_lots:
                 label = percent_band(artifact_percent(lot.get("additional")))
                 if label is None or label in percent_views:
@@ -815,7 +935,7 @@ def analyze_item(
                     row for row in known_sales
                     if percent_band(artifact_percent(row.get("additional"))) == label
                 ]
-                percent_views[label] = _build_view(band_lots, band_sales)
+                percent_views[label] = _build_view(band_lots, band_sales, now, days)
 
         stack = analyze_stack_group(group_lots, overall["sales"], config)
         if stack:
@@ -923,6 +1043,9 @@ def analyze_item(
                 values = [value for value in (sales_base, market_base) if value]
                 benchmark = sum(values) / len(values) if values else None
                 eligible = bool(view_stats and view_market)
+            elif benchmark_mode == "adaptive":
+                benchmark = view.get("adaptive") or sales_base
+                eligible = bool(view_stats)
             else:
                 benchmark = sales_base
                 eligible = bool(view_stats)
@@ -935,7 +1058,7 @@ def analyze_item(
             base_for_lot = benchmark
             market_cap = None
             capped = False
-            if cap_by_market and benchmark_mode in ("mean", "median", "trimmed"):
+            if cap_by_market and benchmark_mode in ("mean", "median", "trimmed", "adaptive"):
                 market_cap = _market_cap(view_prices, unit)
                 if market_cap and market_cap < base_for_lot:
                     base_for_lot = market_cap
@@ -953,6 +1076,44 @@ def analyze_item(
                 variant_category
                 and config.get("group_by_qlt", True)
                 and not isinstance(lot_additional.get("qlt"), (int, float))
+            )
+            sales_per_day = volume / days if days else 0.0
+            view_lots = view.get("lots") or []
+            cheaper = [
+                other for other in view_lots
+                if other.get("unit_price") and other["unit_price"] < unit
+            ]
+            queue_units = sum(int(other.get("amount") or 0) for other in cheaper)
+            queue_lots = len(cheaper)
+            other_prices = [
+                float(other["unit_price"]) for other in view_lots
+                if other.get("unit_price") and other["unit_price"] > unit
+            ]
+            undercut_price = round(min(other_prices) * 0.99, 2) if other_prices else None
+            expected_days = (
+                max(0.1, round((queue_units + int(lot["amount"])) / sales_per_day, 1))
+                if sales_per_day > 0 else None
+            )
+            restrictions = _restriction_flags(lot_additional)
+            conservative_price = view.get("conservative")
+            if conservative_price:
+                conservative_price = min(conservative_price, base_for_lot)
+            optimistic_price = view.get("optimistic")
+            if optimistic_price:
+                optimistic_price = max(optimistic_price, base_for_lot)
+            net_margin_pct = net_unit / base_for_lot * 100.0 if base_for_lot else 0.0
+            score, score_label, score_parts = opportunity_score(
+                discount_pct=discount * 100.0,
+                net_margin_pct=net_margin_pct,
+                sales_per_day=sales_per_day,
+                sell_through_pct=view.get("sell_through_pct"),
+                queue_units=queue_units,
+                trend_pct=view.get("trend_pct"),
+                reliability=_reliability(volume, view_stats["sales_count"] if view_stats else 0),
+                restricted=bool(restrictions),
+                variant_unknown=variant_unknown,
+                fallback=bool(amount_fallback or percent_fallback),
+                capped=capped,
             )
             deals.append(
                 {
@@ -978,7 +1139,7 @@ def analyze_item(
                     "amount_fallback": amount_fallback,
                     "percent_fallback": percent_fallback,
                     "variant_unknown": variant_unknown,
-                    "restrictions": _restriction_flags(lot_additional),
+                    "restrictions": restrictions,
                     "benchmark": round(base_for_lot, 2),
                     "benchmark_mode": benchmark_mode,
                     "sales_base": round(sales_base, 2) if sales_base else None,
@@ -1001,8 +1162,25 @@ def analyze_item(
                     "volume": volume,
                     "sales_count": view_stats["sales_count"] if view_stats else 0,
                     "sales_filtered": view["sales_filtered"],
-                    "sales_per_day": round(volume / days, 2),
+                    "sales_per_day": round(sales_per_day, 2),
                     "reliability": _reliability(volume, view_stats["sales_count"] if view_stats else 0),
+                    "recent_median": view["recent_stats"]["median"] if view.get("recent_stats") else None,
+                    "trend_pct": view.get("trend_pct"),
+                    "volatility_pct": view.get("volatility_pct"),
+                    "adaptive_base": view.get("adaptive"),
+                    "conservative_price": conservative_price,
+                    "optimistic_price": optimistic_price,
+                    "supply_units": view.get("supply_units"),
+                    "supply_lots": view.get("supply_lots"),
+                    "sell_through_pct": view.get("sell_through_pct"),
+                    "days_to_clear": view.get("days_to_clear"),
+                    "queue_units": queue_units,
+                    "queue_lots": queue_lots,
+                    "undercut_price": undercut_price,
+                    "expected_days": expected_days,
+                    "score": score,
+                    "score_label": score_label,
+                    "score_parts": score_parts,
                     "time_left_min": time_left_min,
                     "end_time": end.isoformat() if end else None,
                     "additional": lot_additional,

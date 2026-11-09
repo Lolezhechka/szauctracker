@@ -99,7 +99,9 @@
       <option value="24">до 24 ч</option>
       <option value="72">до 3 дней</option>
     </select>
+    <input id="dealBudget" class="input" type="number" min="0" step="1000" placeholder="Бюджет, ₽" style="width:130px">
     <select id="dealSort" class="input select">
+      <option value="score">Сначала высокий рейтинг</option>
       <option value="total" selected>Сначала больше сумма</option>
       <option value="discount">Сначала выгоднее (%)</option>
       <option value="profit">Сначала больше профит / шт.</option>
@@ -111,6 +113,7 @@
   </div>
 
   <p class="hint" id="calcHint"></p>
+  <p class="hint" id="budgetHint"></p>
   <p class="hint warn hidden" id="coverageHint"></p>
   <p class="hint warn hidden" id="deadHint"></p>
 
@@ -124,6 +127,7 @@
           <th class="num">Кол-во</th>
           <th class="num">Профит всего</th>
           <th class="num">Скидка</th>
+          <th class="num">Оценка</th>
           <th class="num">Профит / шт.</th>
           <th class="num">База / шт.</th>
           <th class="num">Рынок / шт.</th>
@@ -430,6 +434,7 @@
         </label>
         <label>База сравнения
           <select name="benchmark" class="input select">
+            <option value="adaptive">Адаптивная: свежие продажи + тренд</option>
             <option value="median">Медиана продаж (устойчива к выбросам)</option>
             <option value="mean">Средняя арифметическая продаж</option>
             <option value="trimmed">Усечённая средняя продаж (10%)</option>
