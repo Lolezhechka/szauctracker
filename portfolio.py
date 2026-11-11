@@ -100,6 +100,15 @@ class PortfolioStore:
             for row in rows
         ]
 
+    def backup_to(self, path: Path | str) -> None:
+        with self._lock:
+            target = sqlite3.connect(str(path))
+            try:
+                self._conn.backup(target)
+                target.commit()
+            finally:
+                target.close()
+
     def close(self) -> None:
         with self._lock:
             try:

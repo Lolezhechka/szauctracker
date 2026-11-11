@@ -408,7 +408,6 @@ function renderSettings() {
   form.elements.group_by_qlt.checked = !!cfg.group_by_qlt;
   form.elements.group_by_ptn.checked = !!cfg.group_by_ptn;
   form.elements.group_by_stack.checked = cfg.group_by_stack !== false;
-  form.elements.group_by_percent.checked = cfg.group_by_percent !== false;
   form.elements.auto_scan.checked = !!cfg.auto_scan;
   form.elements.scan_interval_min.value = cfg.scan_interval_min;
   form.elements.scan_workers.value = cfg.scan_workers;
@@ -448,7 +447,6 @@ function collectSettings() {
     group_by_qlt: checked("group_by_qlt"),
     group_by_ptn: checked("group_by_ptn"),
     group_by_stack: checked("group_by_stack"),
-    group_by_percent: checked("group_by_percent"),
     auto_scan: checked("auto_scan"),
     scan_interval_min: Number(value("scan_interval_min")),
     scan_workers: Number(value("scan_workers")),
@@ -685,7 +683,6 @@ function filteredDeals() {
   const minPrice = Number($("#dealMinPrice").value || 0);
   const maxLots = Number($("#dealMaxLots").value || 0);
   const minQlt = $("#dealMinQlt").value;
-  const minPercent = Number($("#dealMinPercent").value || 0);
   const bonus = $("#dealBonus").value;
   const minReliability = $("#dealMinReliability").value;
   const maxTime = Number($("#dealMaxTime").value || 0);
@@ -700,7 +697,6 @@ function filteredDeals() {
     if ((deal.unit_price || 0) < minPrice) return false;
     if (maxLots && (deal.lots_count || 1) > maxLots) return false;
     if (minQlt !== "" && deal.qlt !== Number(minQlt)) return false;
-    if (minPercent > 0 && (deal.artifact_percent === null || deal.artifact_percent === undefined || deal.artifact_percent < minPercent)) return false;
     if (bonus && !(deal.bonus_properties || []).includes(bonus)) return false;
     if (category && categoryOf(deal.category) !== category) return false;
     if (onlyLiquid && (deal.volume || 0) < 3) return false;
@@ -756,10 +752,6 @@ function dealRowHtml(deal, index) {
   const tags = [];
   if (deal.qlt_label) tags.push(`<span class="tag qlt-${esc(deal.qlt)}">${esc(deal.qlt_label)}</span>`);
   if (deal.ptn_label) tags.push(`<span class="tag">${esc(deal.ptn_label)}</span>`);
-  if (deal.artifact_percent !== null && deal.artifact_percent !== undefined) {
-    const band = deal.percent_band ? ` · диапазон ${deal.percent_band}%` : "";
-    tags.push(`<span class="tag pct" title="Процент артефакта${band}">${esc(deal.artifact_percent)}%</span>`);
-  }
   if (deal.amount > 1 && deal.amount_band_label) {
     tags.push(`<span class="tag" title="Сравнение с продажами стаков этого размера">стак ${esc(deal.amount_band_label)}</span>`);
   }
@@ -833,8 +825,7 @@ function dealRowHtml(deal, index) {
           <div class="detail-item">Сравнение<b>${esc(comparableLabel(deal.comparable_basis))}</b></div>
           <div class="detail-item">Сопоставимых продаж<b>${money(deal.volume)} шт. / ${deal.sales_count} лот(ов)</b></div>
           <div class="detail-item">Размер стека<b>${esc(deal.amount_band_label || (deal.amount > 1 ? `${deal.amount} шт.` : "1 шт."))}</b></div>
-          ${deal.percent_band ? `<div class="detail-item">Диапазон процента<b>${esc(deal.percent_band)}%</b></div>` : ""}
-          ${deal.amount_fallback || deal.percent_fallback ? `<div class="detail-item">Точность<b class="bad">сравнение с ближайшим диапазоном</b></div>` : ""}
+          ${deal.amount_fallback ? `<div class="detail-item">Точность<b class="bad">сравнение с ближайшим диапазоном стака</b></div>` : ""}
           ${deal.variant_unknown ? `<div class="detail-item">Вариант<b class="bad">не определён API</b></div>` : ""}
           ${(deal.restrictions || []).length ? `<div class="detail-item">Ограничения<b class="bad">${esc((deal.restrictions || []).join(", "))}</b></div>` : ""}
           <div class="detail-item">Отброшено (вне рынка ×10)<b>${money(deal.sales_filtered || 0)}</b></div>
@@ -842,7 +833,6 @@ function dealRowHtml(deal, index) {
           <div class="detail-item">Хватит на<b>${deal.sales_per_day ? `~${Math.ceil((deal.amount || 0) / deal.sales_per_day)} дн. продаж` : "—"}</b></div>
           <div class="detail-item">Совет: быстро<b class="${fastProfit > 0 ? "good" : "bad"}">${fastPrice !== null ? `${moneyFine(fastPrice)} · ${fastProfit > 0 ? "+" : ""}${moneyFine(fastProfit)}/шт` : "—"}</b></div>
           <div class="detail-item">Совет: по рынку<b class="${marketProfit > 0 ? "good" : "bad"}">${marketPrice ? `${moneyFine(marketPrice)} · ${marketProfit > 0 ? "+" : ""}${moneyFine(marketProfit)}/шт` : "—"}</b></div>
-          ${deal.artifact_percent !== null && deal.artifact_percent !== undefined ? `<div class="detail-item">Процент артефакта<b>${esc(deal.artifact_percent)}%</b></div>` : ""}
           ${bonuses.length ? `<div class="detail-item">Бонусы<b>${esc(bonuses.join(", "))}</b></div>` : ""}
           <div class="detail-item">График<b><button type="button" class="btn small" data-analytics="${esc(`${deal.item_id}|${deal.qlt ?? ""}|${deal.ptn ?? ""}`)}">Открыть</button></b></div>
           <div class="detail-item">Портфель<b><button type="button" class="btn small primary" data-buy="${index}">Купил</button></b></div>
@@ -2013,7 +2003,6 @@ function openRuleEditor(itemId) {
   $("#ruleMinPrice").value = rule.min_price ?? "";
   $("#ruleMinProfit").value = rule.min_profit ?? "";
   $("#ruleQlt").value = rule.qlt ?? "";
-  $("#ruleMinPercent").value = rule.min_percent ?? "";
   populateRuleBonuses(rule.bonus || "");
   const panel = $("#ruleEditor");
   panel.classList.remove("hidden");
@@ -2028,12 +2017,10 @@ async function saveRule(clear = false) {
     const minPrice = $("#ruleMinPrice").value.trim();
     const minProfit = $("#ruleMinProfit").value.trim();
     const qlt = $("#ruleQlt").value;
-    const minPercent = $("#ruleMinPercent").value.trim();
     const bonus = $("#ruleBonus").value;
     if (minPrice !== "") rule.min_price = Number(minPrice);
     if (minProfit !== "") rule.min_profit = Number(minProfit);
     if (qlt !== "") rule.qlt = Number(qlt);
-    if (minPercent !== "") rule.min_percent = Number(minPercent);
     if (bonus) rule.bonus = bonus;
   }
   try {

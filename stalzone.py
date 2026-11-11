@@ -29,7 +29,7 @@ BASE_DEMO = "https://dapi.stalzone.net"
 DEMO_CLIENT_ID = "1"
 DEMO_CLIENT_SECRET = "E98cm6J9NNjTQopph0c2eIXNKafg4R1Cjz0TZh2D"
 
-USER_AGENT = "SZAUCTRACKER/1.9 (local tool)"
+USER_AGENT = "SZAUCTRACKER/2.0 (local tool)"
 
 REGIONS = [
     {"id": "RU", "name": "Россия"},
@@ -88,6 +88,9 @@ class RateLimiter:
                     self._last = now
                     return
             time.sleep(min(wait, 5.0))
+
+
+GLOBAL_LIMITER = RateLimiter()
 
 
 class DiskCache:
@@ -234,6 +237,7 @@ class StalzoneClient:
         cache_dir: Path | str | None = None,
         timeout: float = 25.0,
         demo: bool = False,
+        limiter: RateLimiter | None = None,
     ):
         self.client_id = (client_id or "").strip()
         self.client_secret = (client_secret or "").strip()
@@ -241,7 +245,7 @@ class StalzoneClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.demo = demo
-        self.limiter = RateLimiter()
+        self.limiter = limiter or GLOBAL_LIMITER
         self.cache = DiskCache(cache_dir)
         self.cache.evict(max_age_days=7, max_bytes=50 * 1024 * 1024)
         self.http = HttpSession(self.base_url, timeout)

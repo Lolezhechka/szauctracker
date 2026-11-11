@@ -88,7 +88,6 @@
       <option value="4">Исключительный</option>
       <option value="5">Легендарный</option>
     </select>
-    <input id="dealMinPercent" class="input" type="number" min="0" max="200" step="1" placeholder="% артефакта" style="width:120px">
     <select id="dealBonus" class="input select"><option value="">Любой бонус</option></select>
     <select id="dealMinReliability" class="input select">
       <option value="">Любая надёжность</option>
@@ -454,9 +453,6 @@
           <option value="5">Легендарный</option>
         </select>
       </label>
-      <label>Мин. процент артефакта
-        <input id="ruleMinPercent" class="input" type="number" min="0" max="200" step="1" placeholder="любой">
-      </label>
       <label>Бонус
         <select id="ruleBonus" class="input select"><option value="">Любой</option></select>
       </label>
@@ -547,7 +543,6 @@
         <label class="check-line"><input name="group_by_qlt" type="checkbox"> Сравнивать только одинаковое качество</label>
         <label class="check-line"><input name="group_by_ptn" type="checkbox"> Сравнивать только одинаковый паттерн / апгрейд</label>
         <label class="check-line"><input name="group_by_stack" type="checkbox"> Сравнивать лоты с продажами того же размера стака</label>
-        <label class="check-line"><input name="group_by_percent" type="checkbox"> Учитывать процент артефакта (если известен)</label>
       </div>
       <p class="hint">«Ограничивать базу текущим рынком» не даёт средней по прошлым продажам завышать цену продажи, если рынок уже упал: для каждого лота база ограничивается 25-м перцентилем цен конкурирующих лотов того же варианта. Отключите, если хотите видеть чистую медиану продаж.</p>
     </div>
@@ -610,6 +605,7 @@
       <button type="submit" class="btn primary">Сохранить настройки</button>
       <button type="button" id="saveAndScanBtn" class="btn">Сохранить и сканировать</button>
       <button type="button" id="clearSecretBtn" class="btn danger ghost">Удалить секрет</button>
+      <a id="backupLink" class="btn" href="/api/backup" download>Скачать backup</a>
       <span id="settingsStatus" class="muted"></span>
     </div>
   </form>

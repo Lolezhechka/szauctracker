@@ -1,7 +1,7 @@
 """Локальный журнал жизненного цикла лотов.
 
 API не отдаёт lotId, поэтому лот идентифицируется стабильной подписью
-(предмет, количество, endTime, качество, паттерн, процент, бонусы, spawn_time).
+(предмет, количество, endTime, качество, паттерн, бонусы, spawn_time).
 Подпись не включает цену: изменение цены — это событие price у того же лота.
 """
 
@@ -60,7 +60,6 @@ def _sig_base(item: str, lot: dict) -> str:
         "end": str(lot.get("endTime") or ""),
         "qlt": additional.get("qlt"),
         "ptn": additional.get("ptn"),
-        "sr": additional.get("stats_random"),
         "bp": additional.get("bonus_properties"),
         "sp": additional.get("spawn_time"),
     }
@@ -357,9 +356,28 @@ class MarketStore:
             self._conn.commit()
         return int(events + lots)
 
+    def checkpoint(self) -> None:
+        with self._lock:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self._conn.commit()
+            except sqlite3.Error:
+                pass
+
+    def backup_to(self, path: Path | str) -> None:
+        with self._lock:
+            self.checkpoint()
+            target = sqlite3.connect(str(path))
+            try:
+                self._conn.backup(target)
+                target.commit()
+            finally:
+                target.close()
+
     def close(self) -> None:
         with self._lock:
             try:
+                self.checkpoint()
                 self._conn.close()
             except sqlite3.Error:
                 pass

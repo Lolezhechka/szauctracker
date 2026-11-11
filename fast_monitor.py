@@ -5,21 +5,23 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from market_store import _sig_base
+from scanner import compute_stats, stack_band
 from stalzone import make_client
 
 FAST_MAX_ITEMS = 8
 
 
 class FastMonitor:
-    def __init__(self, store, catalog, manager, cache_dir, log=None):
+    def __init__(self, store, catalog, manager, cache_dir, log=None, history_store=None):
         self.store = store
         self.catalog = catalog
         self.manager = manager
         self.cache_dir = cache_dir
         self.log = log
+        self.history_store = history_store
         self.interval = 30
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -79,6 +81,41 @@ class FastMonitor:
                 bench.setdefault((item_id, None, None), base)
         return bench
 
+    def _band_benchmark(self, sales: list[dict], additional: dict, amount: int) -> float | None:
+        if not sales:
+            return None
+        qlt = additional.get("qlt")
+        ptn = additional.get("ptn")
+        matching = []
+        for row in sales:
+            extra = row.get("additional") if isinstance(row.get("additional"), dict) else {}
+            row_qlt = extra.get("qlt")
+            row_ptn = extra.get("ptn")
+            if isinstance(qlt, (int, float)) and row_qlt != qlt:
+                continue
+            if isinstance(ptn, (int, float)) and row_ptn != ptn:
+                continue
+            row_amount = int(row.get("amount") or 0)
+            row_price = int(row.get("price") or 0)
+            if row_amount <= 0 or row_price <= 0:
+                continue
+            matching.append(
+                {
+                    "unit": row_price / row_amount,
+                    "amount": row_amount,
+                    "time": row.get("time"),
+                }
+            )
+        if not matching:
+            return None
+        if int(amount) > 1:
+            band = stack_band(amount)
+            band_rows = [row for row in matching if stack_band(row["amount"]) == band]
+            if len(band_rows) >= 2:
+                matching = band_rows
+        stats = compute_stats(matching)
+        return stats.get("median") if stats else None
+
     def _check(self) -> None:
         config = self.store.snapshot()
         items = self._fast_items(config)
@@ -104,6 +141,8 @@ class FastMonitor:
         min_profit = float(config.get("min_profit") or 0)
         client = make_client(config, self.cache_dir)
         now = datetime.now(timezone.utc)
+        history_cutoff = now - timedelta(days=max(0.25, float(config.get("days", 2))))
+        history_cache: dict[str, list[dict]] = {}
         for item_id in items:
             try:
                 data = client.get_lots(
@@ -135,7 +174,17 @@ class FastMonitor:
                 unit = buyout / amount
                 additional = lot.get("additional") if isinstance(lot.get("additional"), dict) else {}
                 key = (item_id, additional.get("qlt"), additional.get("ptn"))
-                base = bench.get(key) or bench.get((item_id, None, None))
+                market_base = bench.get(key) or bench.get((item_id, None, None))
+                sales_base = None
+                if self.history_store is not None:
+                    if item_id not in history_cache:
+                        try:
+                            history_cache[item_id] = self.history_store.get_sales(item_id, history_cutoff)
+                        except Exception:
+                            history_cache[item_id] = []
+                    sales_base = self._band_benchmark(history_cache[item_id], additional, amount)
+                values = [float(v) for v in (sales_base, market_base) if v]
+                base = min(values) if values else None
                 if not base or base <= 0 or unit < min_price:
                     continue
                 discount = 1.0 - unit / base

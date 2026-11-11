@@ -18,10 +18,12 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import traceback
 import urllib.request
+import zipfile
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,7 +36,7 @@ from catalog import Catalog
 from history_store import HistoryStore
 from market_store import MarketStore
 from portfolio import PortfolioStore
-from scanner import scan
+from scanner import scan, stack_band
 from stalzone import ApiError, REGIONS, make_client
 
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -106,7 +108,6 @@ DEFAULT_CONFIG = {
     "group_by_qlt": True,
     "group_by_ptn": True,
     "group_by_stack": True,
-    "group_by_percent": True,
     "auto_scan": True,
     "scan_interval_min": 5,
     "scan_workers": 10,
@@ -171,8 +172,6 @@ def _clean_rule(rule) -> dict:
     for key in ("min_price", "min_profit"):
         if key in rule and rule[key] not in ("", None):
             cleaned[key] = int(_clamp(rule[key], 0, 10**12, 0))
-    if "min_percent" in rule and rule["min_percent"] not in ("", None):
-        cleaned["min_percent"] = round(_clamp(rule["min_percent"], 0, 200, 0), 1)
     if "qlt" in rule and rule["qlt"] not in ("", None):
         cleaned["qlt"] = int(_clamp(rule["qlt"], 0, 6, 0))
     if "bonus" in rule and str(rule["bonus"]).strip():
@@ -248,13 +247,14 @@ class Store:
         out["scan_interval_min"] = int(_clamp(out.get("scan_interval_min"), 1, 180, 5))
         out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 16, 10))
         out["history_ttl_min"] = int(_clamp(out.get("history_ttl_min"), 1, 1440, 30))
+        out.pop("group_by_percent", None)
         out["benchmark"] = str(out.get("benchmark", "median"))
         if out["benchmark"] not in ("mean", "median", "trimmed", "lots", "blend", "adaptive"):
             out["benchmark"] = "adaptive"
         out["cap_by_market"] = bool(out.get("cap_by_market", True))
         out["client_id"] = str(out.get("client_id") or "").strip()[:64]
         out["client_secret"] = str(out.get("client_secret") or "").strip()[:256]
-        for key in ("demo", "auto_scan", "discovery_enabled", "group_by_qlt", "group_by_ptn", "group_by_stack", "group_by_percent"):
+        for key in ("demo", "auto_scan", "discovery_enabled", "group_by_qlt", "group_by_ptn", "group_by_stack"):
             out[key] = bool(out.get(key))
         out["watchlist"] = _clean_watchlist(out.get("watchlist"))
         out["item_rules"] = _clean_item_rules(out.get("item_rules"))
@@ -304,7 +304,6 @@ class Store:
                 "group_by_qlt",
                 "group_by_ptn",
                 "group_by_stack",
-                "group_by_percent",
                 "client_id",
                 "item_rules",
             ):
@@ -632,7 +631,12 @@ class ScanManager:
             self.results = results
             self._save_results(results)
             self.phase = "готово"
-            self.error = None
+            errors = int(results.get("items_errors") or 0)
+            total = max(1, int(results.get("items_total") or 0))
+            self.error = (
+                f"Много ошибок сети/API: {errors} из {total} предметов. Проверьте соединение."
+                if errors >= max(3, total // 2) else None
+            )
             log_line(
                 f"Скан завершён: предметов {results['items_total']}, сделок {results['deals_count']}, "
                 f"запросов {results['api'].get('requests')}, {results['elapsed_sec']} с"
@@ -647,6 +651,11 @@ class ScanManager:
             log_line("Скан упал:\n" + traceback.format_exc())
         finally:
             self.finished_at = time.time()
+            if self.market_store is not None:
+                try:
+                    self.market_store.checkpoint()
+                except Exception:
+                    pass
             if self._cancel.is_set() and self.phase != "ошибка":
                 self.phase = "остановлено"
             elif self.phase not in ("готово", "ошибка", "остановлено"):
@@ -703,9 +712,21 @@ class AppState:
         self.barter_prices = {}
         self.barter_lock = threading.Lock()
         self.manager = ScanManager(self.store, self.catalog, self.history, self.dead, self.market)
-        self.fast = FastMonitor(self.store, self.catalog, self.manager, CACHE_DIR, log_line)
+        self.fast = FastMonitor(self.store, self.catalog, self.manager, CACHE_DIR, log_line, self.history)
         self.fast.start()
         self.stop_event = threading.Event()
+
+    def close(self) -> None:
+        try:
+            self.fast.stop()
+        except Exception:
+            pass
+        for store in (self.history, self.portfolio, self.market):
+            try:
+                if store is not None:
+                    store.close()
+            except Exception:
+                pass
 
 
 def _safe_config(config: dict) -> dict:
@@ -758,7 +779,7 @@ def _compact_results(results: dict) -> dict:
     return compact
 
 
-def _market_for_item(results: dict, item: str, qlt, ptn):
+def _market_for_item(results: dict, item: str, qlt, ptn, amount=None):
     """Возвращает группу и текущую цену продажи для портфеля."""
     item_result = next((row for row in results.get("items", []) if row.get("id") == item), None)
     if not item_result:
@@ -775,6 +796,12 @@ def _market_for_item(results: dict, item: str, qlt, ptn):
         return item_result, None
     market = group.get("market") or {}
     stats = group.get("stats") or {}
+    bands = group.get("amount_bands") or {}
+    if amount is not None and bands:
+        band_view = bands.get(stack_band(amount))
+        if band_view:
+            market = band_view.get("market") or market
+            stats = band_view.get("stats") or stats
     current = market.get("p25") or market.get("median") or stats.get("median")
     return item_result, {
         "current_price": current,
@@ -800,7 +827,6 @@ def _csv_bytes(results: dict) -> bytes:
             "Категория",
             "Качество",
             "Паттерн/уровень",
-            "Процент",
             "Стак",
             "Тренд, %",
             "Дней до продажи",
@@ -826,7 +852,6 @@ def _csv_bytes(results: dict) -> bytes:
                 deal.get("category"),
                 deal.get("qlt_label") or "",
                 deal.get("ptn_label") or "",
-                deal.get("artifact_percent") if deal.get("artifact_percent") is not None else "",
                 deal.get("amount_band_label") or "",
                 deal.get("trend_pct") if deal.get("trend_pct") is not None else "",
                 deal.get("expected_days") if deal.get("expected_days") is not None else "",
@@ -919,7 +944,7 @@ def _icon_candidates(item: str, category: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/1.9"
+    server_version = "SZAUCTRACKER/2.0"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -933,13 +958,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, code: int, payload) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, BrokenPipeError, OSError):
+            self.close_connection = True
 
     def _error(self, code: int, message: str) -> None:
         self._json(code, {"error": message})
@@ -1002,6 +1030,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.state.fast.snapshot())
             elif path == "/api/icon":
                 self._icon(query)
+            elif path == "/api/backup":
+                self._backup()
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":
@@ -1068,6 +1098,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True, "time": time.time()})
             else:
                 self._error(404, "Не найдено")
+        except (ConnectionAbortedError, BrokenPipeError):
+            self.close_connection = True
         except Exception as exc:
             log_line(f"GET {path}: {exc}")
             self._error(500, f"Внутренняя ошибка: {exc}")
@@ -1149,6 +1181,8 @@ class Handler(BaseHTTPRequestHandler):
             self._error(400, str(exc))
         except ApiError as exc:
             self._json(400, {"error": str(exc), "status_code": exc.status})
+        except (ConnectionAbortedError, BrokenPipeError):
+            self.close_connection = True
         except Exception as exc:
             log_line(f"POST {path}: {exc}")
             self._error(500, f"Внутренняя ошибка: {exc}")
@@ -1179,6 +1213,46 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return None
 
+    def _backup(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="szauctracker-backup-"))
+        try:
+            for store, name in (
+                (self.state.history, "history.db"),
+                (self.state.portfolio, "portfolio.db"),
+                (self.state.market, "market.db"),
+            ):
+                if store is not None:
+                    try:
+                        store.backup_to(tmp / name)
+                    except Exception as exc:
+                        log_line(f"Backup {name}: {exc}")
+            for source, name in (
+                (CONFIG_PATH, "config.json"),
+                (DEAD_PATH, "dead_items.json"),
+                (DISCOVERY_PATH, "discovery.json"),
+            ):
+                if source.exists():
+                    shutil.copy2(source, tmp / name)
+            payload = io.BytesIO()
+            with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(tmp.iterdir()):
+                    if path.is_file():
+                        archive.write(path, path.name)
+            data = payload.getvalue()
+            stamp = datetime.now().strftime("%Y%m%d-%H%M")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", f'attachment; filename="szauctracker-backup-{stamp}.zip"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (ConnectionAbortedError, BrokenPipeError, OSError):
+            pass
+        except Exception as exc:
+            self._error(500, f"Не удалось сделать backup: {exc}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def _icon(self, query) -> None:
         item = (query.get("item") or [""])[0].strip()
         if not ITEM_ID_RE.match(item):
@@ -1199,7 +1273,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"main/global/icons/{candidate}"
             )
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/1.9"})
+                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.0"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     data = resp.read()
                 if not data:
@@ -1308,7 +1382,8 @@ class Handler(BaseHTTPRequestHandler):
             market = None
             if not position.get("sold_at"):
                 _, market = _market_for_item(
-                    results, position["item"], position.get("qlt"), position.get("ptn")
+                    results, position["item"], position.get("qlt"), position.get("ptn"),
+                    position.get("amount"),
                 )
             current = market.get("current_price") if market else None
             position["market"] = market
@@ -1767,6 +1842,10 @@ class AppServer:
             pass
         try:
             self.httpd.server_close()
+        except Exception:
+            pass
+        try:
+            self.state.close()
         except Exception:
             pass
         log_line("Сервер остановлен")

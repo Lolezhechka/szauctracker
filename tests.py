@@ -18,7 +18,7 @@ from history_store import HistoryStore
 from market_store import MarketStore
 from portfolio import PortfolioStore
 from stalzone import BASE_DEMO, BASE_PROD, DiskCache
-from scanner import analyze_item, artifact_percent, compute_stats, fetch_history, group_key, percent_band, scan, stack_band
+from scanner import analyze_item, compute_stats, fetch_history, group_key, scan, stack_band
 from app import Store, _clean_watchlist, _compact_results, DeadList
 
 NOW = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
@@ -233,7 +233,6 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.snapshot()["lots_pages"], 2)
             self.assertEqual(store.snapshot()["history_pages"], 5)
             self.assertTrue(store.snapshot()["group_by_stack"])
-            self.assertTrue(store.snapshot()["group_by_percent"])
             self.assertTrue(store.snapshot()["discovery_enabled"])
             self.assertEqual(store.snapshot()["discovery_limit"], 10)
             store.update({"scan_workers": 99, "history_ttl_min": 0, "history_pages": 99, "lots_pages": 0, "discovery_limit": 99})
@@ -555,7 +554,6 @@ class RuleAndDepthTests(unittest.TestCase):
                             "min_price": 1000,
                             "min_profit": 5000,
                             "qlt": 4,
-                            "min_percent": 130,
                             "bonus": "SPEED_MOD",
                             "enabled": True,
                         },
@@ -571,19 +569,6 @@ class RuleAndDepthTests(unittest.TestCase):
             self.assertIn("04yr", store.snapshot()["item_rules"])
             store.set_rule("04yr", {})
             self.assertNotIn("04yr", store.snapshot()["item_rules"])
-
-
-class ArtifactPercentTests(unittest.TestCase):
-    def test_formula(self):
-        self.assertAlmostEqual(artifact_percent({"qlt": 3, "stats_random": -0.5}), 135.6, places=1)
-        self.assertAlmostEqual(artifact_percent({"qlt": 4, "stats_random": 1.5390141}), 153.3, places=1)
-        self.assertAlmostEqual(artifact_percent({"qlt": 0, "stats_random": 0}), 50.0, places=1)
-
-    def test_missing_or_invalid(self):
-        self.assertIsNone(artifact_percent({}))
-        self.assertIsNone(artifact_percent({"qlt": 3}))
-        self.assertIsNone(artifact_percent({"qlt": 9, "stats_random": 0}))
-        self.assertAlmostEqual(artifact_percent({"qlt": 3, "stats_random": 99}), 145.0, places=1)
 
 
 class DealAggregationTests(unittest.TestCase):
@@ -956,9 +941,6 @@ class ComparableBandTests(unittest.TestCase):
         self.assertEqual(stack_band(10), "10-19")
         self.assertEqual(stack_band(49), "20-49")
         self.assertEqual(stack_band(50), "50+")
-        self.assertEqual(percent_band(110), "110-119")
-        self.assertEqual(percent_band(125), "120-129")
-        self.assertIsNone(percent_band(None))
 
     def test_bulk_lot_is_not_compared_with_singles(self):
         history = [sale(1000) for _ in range(5)] + [sale(600, amount=50) for _ in range(5)]
@@ -997,38 +979,20 @@ class ComparableBandTests(unittest.TestCase):
         self.assertTrue(deal["amount_fallback"])
         self.assertEqual(deal["comparable_basis"], "amount-near:10-19")
 
-    def test_artifact_percent_bands_and_per_lot_metadata(self):
-        history = [
-            sale(1000, qlt=2, ptn=15, stats_random=-2) for _ in range(5)
-        ] + [
-            sale(1500, qlt=2, ptn=15, stats_random=2) for _ in range(5)
-        ]
-        lots = [
-            lot(900, qlt=2, ptn=15, stats_random=-2, bonus_properties=["A"]),
-            lot(900, qlt=2, ptn=15, stats_random=2, bonus_properties=["B"]),
-        ]
-        result = self.analyze_cat(lots, history, category="artefact/biochemical")
-        self.assertEqual(len(result["deals"]), 2)
-        by_percent = {deal["artifact_percent"]: deal for deal in result["deals"]}
-        self.assertEqual(by_percent[110]["benchmark"], 1000)
-        self.assertEqual(by_percent[125]["benchmark"], 1500)
-        self.assertEqual(by_percent[110]["percent_band"], "110-119")
-        self.assertEqual(by_percent[125]["percent_band"], "120-129")
-        self.assertEqual(by_percent[110]["bonus_properties"], ["A"])
-        self.assertEqual(by_percent[125]["bonus_properties"], ["B"])
-        self.assertEqual(by_percent[110]["comparable_basis"], "percent:110-119")
-        self.assertFalse(by_percent[110]["percent_fallback"])
-
-    def test_artifact_without_percent_uses_unknown_only(self):
-        history = [sale(1000, qlt=2, ptn=15) for _ in range(5)]
+    def test_artifact_stats_random_is_ignored(self):
+        history = [sale(1000, qlt=2, ptn=15, stats_random=-2) for _ in range(5)]
+        history += [sale(1500, qlt=2, ptn=15, stats_random=2) for _ in range(5)]
         result = self.analyze_cat(
-            [lot(700, qlt=2, ptn=15)], history, category="artefact/biochemical"
+            [lot(900, qlt=2, ptn=15, stats_random=2)],
+            history,
+            category="artefact/biochemical",
         )
         self.assertEqual(len(result["deals"]), 1)
         deal = result["deals"][0]
-        self.assertIsNone(deal["artifact_percent"])
-        self.assertEqual(deal["comparable_basis"], "percent:unknown")
-        self.assertFalse(deal["percent_fallback"])
+        self.assertEqual(deal["benchmark"], 1250)
+        self.assertNotIn("artifact_percent", deal)
+        self.assertNotIn("percent_band", deal)
+        self.assertEqual(deal["comparable_basis"], "overall")
 
     def test_missing_variant_and_restrictions_are_flagged(self):
         result = analyze(
@@ -1377,6 +1341,29 @@ class MarketStoreTests(unittest.TestCase):
             self.assertEqual(counts["appeared"], 2)
             self.assertEqual(store.total("item"), 2)
             store.close()
+
+
+class BackupTests(unittest.TestCase):
+    def test_history_and_market_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history = HistoryStore(root / "history.db")
+            history.add_sales("a", [{"time": iso(NOW), "price": 1000, "amount": 1, "additional": {}}])
+            history.backup_to(root / "history-copy.db")
+            history.close()
+            import sqlite3
+            conn = sqlite3.connect(root / "history-copy.db")
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 1)
+            conn.close()
+
+            market = MarketStore(root / "market.db")
+            market.observe("a", [{"amount": 1, "buyoutPrice": 900, "endTime": iso(NOW + timedelta(hours=2)), "additional": {}}], now=NOW)
+            market.checkpoint()
+            market.backup_to(root / "market-copy.db")
+            market.close()
+            conn = sqlite3.connect(root / "market-copy.db")
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM lots").fetchone()[0], 1)
+            conn.close()
 
 
 class CacheEvictionTests(unittest.TestCase):

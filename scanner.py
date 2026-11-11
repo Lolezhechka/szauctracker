@@ -19,16 +19,6 @@ QUALITY_LABELS = {
     6: "Уникальный",
 }
 
-# Диапазоны процента артефакта по качеству (wiki: minValue + range * ((stats_random + 2) / 4)).
-ARTIFACT_RANGES = {
-    0: (0.0, 100.0),
-    1: (100.0, 15.0),
-    2: (110.0, 15.0),
-    3: (130.0, 15.0),
-    4: (140.0, 15.0),
-    5: (150.0, 15.0),
-}
-
 # Стаки разного размера торгуются по разной цене за штуку: 1 шт. обычно дороже,
 # чем 50+. Сравнивать их в одной медиане нельзя.
 STACK_BANDS = (
@@ -181,21 +171,6 @@ def _quality_label(qlt) -> str | None:
     return QUALITY_LABELS.get(int(qlt), f"Качество {int(qlt)}")
 
 
-def artifact_percent(additional) -> float | None:
-    """Процент артефакта по qlt и stats_random; None, если данных нет."""
-    if not isinstance(additional, dict):
-        return None
-    qlt = additional.get("qlt")
-    stats_random = additional.get("stats_random")
-    if not isinstance(qlt, (int, float)) or not isinstance(stats_random, (int, float)):
-        return None
-    bounds = ARTIFACT_RANGES.get(int(qlt))
-    if bounds is None:
-        return None
-    minimum, span = bounds
-    value = minimum + span * ((float(stats_random) + 2.0) / 4.0)
-    value = max(minimum, min(minimum + span, value))
-    return round(value, 1)
 
 
 def _bonus_properties(additional) -> list[str]:
@@ -248,11 +223,6 @@ def _stack_band_index(band: str) -> int:
     return 0
 
 
-def percent_band(percent, width: float = 10.0) -> str | None:
-    if not isinstance(percent, (int, float)):
-        return None
-    low = int(float(percent) // width) * int(width)
-    return f"{low}-{low + int(width) - 1}"
 
 
 def _restriction_flags(additional) -> list[str]:
@@ -733,7 +703,6 @@ def _aggregate_deals(deals: list[dict]) -> list[dict]:
             deal["group_key"],
             round(float(deal["unit_price"]), 2),
             deal.get("amount_band"),
-            deal.get("percent_band"),
         )
         current = grouped.get(key)
         if current is None:
@@ -777,7 +746,6 @@ def analyze_item(
     name = (meta or {}).get("name") or item_id
     category = (meta or {}).get("category") or "other"
     filter_qlt = config.get("filter_qlt")
-    filter_percent = config.get("filter_min_percent")
     filter_bonus = config.get("filter_bonus")
 
     sales_by_group: dict[str, list[dict]] = defaultdict(list)
@@ -794,10 +762,6 @@ def analyze_item(
         additional = row.get("additional") if isinstance(row.get("additional"), dict) else {}
         if filter_qlt is not None:
             if not isinstance(additional.get("qlt"), (int, float)) or int(additional["qlt"]) != filter_qlt:
-                continue
-        if filter_percent:
-            percent = artifact_percent(additional)
-            if percent is None or percent < filter_percent:
                 continue
         if filter_bonus and filter_bonus not in _bonus_properties(additional):
             continue
@@ -862,22 +826,16 @@ def analyze_item(
         coverage = build_coverage(history, cutoff, window_hours, api_sample_size)
 
     group_by_stack = bool(config.get("group_by_stack", True))
-    group_by_percent = bool(config.get("group_by_percent", True))
     for key in sorted(set(sales_by_group) | set(lots_by_group)):
         raw_sales = sales_by_group.get(key, [])
         group_lots = lots_by_group.get(key, [])
-        if filter_percent or filter_bonus:
-            matching_lots = []
-            for lot in group_lots:
-                lot_additional = lot.get("additional") if isinstance(lot.get("additional"), dict) else {}
-                if filter_percent:
-                    lot_percent = artifact_percent(lot_additional)
-                    if lot_percent is None or lot_percent < filter_percent:
-                        continue
-                if filter_bonus and filter_bonus not in _bonus_properties(lot_additional):
-                    continue
-                matching_lots.append(lot)
-            group_lots = matching_lots
+        if filter_bonus:
+            group_lots = [
+                lot for lot in group_lots
+                if filter_bonus in _bonus_properties(
+                    lot.get("additional") if isinstance(lot.get("additional"), dict) else {}
+                )
+            ]
 
         additional = group_meta.get(key, {})
         qlt = additional.get("qlt")
@@ -890,7 +848,6 @@ def analyze_item(
             any(int(lot.get("amount") or 0) > 1 for lot in group_lots)
             or any(int(row.get("amount") or 0) > 1 for row in raw_sales)
         )
-        artifact = str(category).startswith("artefact")
         overall = _build_view(group_lots, raw_sales, now, days)
         stats = overall["stats"]
         market = overall["market"]
@@ -904,38 +861,6 @@ def analyze_item(
                 band_sales = [row for row in raw_sales if stack_band(row.get("amount")) == label]
                 if band_lots or band_sales:
                     amount_views[label] = _build_view(band_lots, band_sales, now, days)
-
-        percent_views: dict[str, dict] = {}
-        known_view = None
-        unknown_view = None
-        if artifact and group_by_percent:
-            known_lots = []
-            known_sales = []
-            unknown_lots = []
-            unknown_sales = []
-            for lot in group_lots:
-                pct = artifact_percent(lot.get("additional"))
-                (known_lots if pct is not None else unknown_lots).append(lot)
-            for row in raw_sales:
-                pct = artifact_percent(row.get("additional"))
-                (known_sales if pct is not None else unknown_sales).append(row)
-            if known_lots or known_sales:
-                known_view = _build_view(known_lots, known_sales, now, days)
-            if unknown_lots or unknown_sales:
-                unknown_view = _build_view(unknown_lots, unknown_sales, now, days)
-            for lot in known_lots:
-                label = percent_band(artifact_percent(lot.get("additional")))
-                if label is None or label in percent_views:
-                    continue
-                band_lots = [
-                    item for item in known_lots
-                    if percent_band(artifact_percent(item.get("additional"))) == label
-                ]
-                band_sales = [
-                    row for row in known_sales
-                    if percent_band(artifact_percent(row.get("additional"))) == label
-                ]
-                percent_views[label] = _build_view(band_lots, band_sales, now, days)
 
         stack = analyze_stack_group(group_lots, overall["sales"], config)
         if stack:
@@ -952,7 +877,6 @@ def analyze_item(
                         "ptn": int(ptn) if isinstance(ptn, (int, float)) else None,
                         "qlt_label": _quality_label(qlt),
                         "ptn_label": _pattern_label(ptn, category),
-                        "artifact_percent": artifact_percent(additional),
                         "bonus_properties": _bonus_properties(additional),
                         "additional": additional,
                         "coverage": coverage,
@@ -979,33 +903,12 @@ def analyze_item(
 
             lot_additional = lot.get("additional") if isinstance(lot.get("additional"), dict) else {}
             amount_band = stack_band(lot.get("amount")) if stackable else None
-            lot_percent = artifact_percent(lot_additional) if artifact else None
-            lot_percent_band = percent_band(lot_percent) if lot_percent is not None else None
 
             view = overall
             comparable_basis = "overall"
             amount_fallback = False
-            percent_fallback = False
 
-            if artifact and group_by_percent:
-                if lot_percent is not None:
-                    candidate = percent_views.get(lot_percent_band)
-                    if candidate and (candidate["stats"] or (benchmark_mode == "lots" and candidate["market"])):
-                        view = candidate
-                        comparable_basis = f"percent:{lot_percent_band}"
-                    elif known_view and (known_view["stats"] or (benchmark_mode == "lots" and known_view["market"])):
-                        view = known_view
-                        comparable_basis = "percent:known"
-                        percent_fallback = True
-                    else:
-                        continue
-                else:
-                    if unknown_view and (unknown_view["stats"] or (benchmark_mode == "lots" and unknown_view["market"])):
-                        view = unknown_view
-                        comparable_basis = "percent:unknown"
-                    else:
-                        continue
-            elif stackable and group_by_stack:
+            if stackable and group_by_stack:
                 candidate = amount_views.get(amount_band)
                 if candidate and (candidate["stats"] or (benchmark_mode == "lots" and candidate["market"])):
                     view = candidate
@@ -1112,7 +1015,7 @@ def analyze_item(
                 reliability=_reliability(volume, view_stats["sales_count"] if view_stats else 0),
                 restricted=bool(restrictions),
                 variant_unknown=variant_unknown,
-                fallback=bool(amount_fallback or percent_fallback),
+                fallback=bool(amount_fallback),
                 capped=capped,
             )
             deals.append(
@@ -1125,7 +1028,6 @@ def analyze_item(
                     "ptn": int(ptn) if isinstance(ptn, (int, float)) else None,
                     "qlt_label": _quality_label(qlt),
                     "ptn_label": _pattern_label(ptn, category),
-                    "artifact_percent": lot_percent,
                     "bonus_properties": _bonus_properties(lot_additional),
                     "unit_price": round(unit, 2),
                     "buyout": lot["buyout"],
@@ -1134,10 +1036,8 @@ def analyze_item(
                     "amount": lot["amount"],
                     "amount_band": amount_band,
                     "amount_band_label": stack_band_label(amount_band),
-                    "percent_band": lot_percent_band,
                     "comparable_basis": comparable_basis,
                     "amount_fallback": amount_fallback,
-                    "percent_fallback": percent_fallback,
                     "variant_unknown": variant_unknown,
                     "restrictions": restrictions,
                     "benchmark": round(base_for_lot, 2),
@@ -1197,11 +1097,14 @@ def analyze_item(
                 "ptn": int(ptn) if isinstance(ptn, (int, float)) else None,
                 "qlt_label": _quality_label(qlt),
                 "ptn_label": _pattern_label(ptn, category),
-                "artifact_percent": artifact_percent(additional),
                 "bonus_properties": _bonus_properties(additional),
                 "stats": stats,
                 "sales_filtered": sales_filtered,
                 "market": market,
+                "amount_bands": {
+                    label: {"stats": view["stats"], "market": view["market"]}
+                    for label, view in amount_views.items()
+                },
                 "depth": depth,
                 "sales_base": round(group_sales_base, 2) if group_sales_base else None,
                 "market_p25": market["p25"] if market else None,
@@ -1419,7 +1322,6 @@ def _scan_one(
             ("min_price", "min_price"),
             ("min_profit", "min_profit"),
             ("qlt", "filter_qlt"),
-            ("min_percent", "filter_min_percent"),
             ("bonus", "filter_bonus"),
         ):
             if source_key in rule:
