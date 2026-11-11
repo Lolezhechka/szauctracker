@@ -229,6 +229,9 @@ main { flex: 1; padding: 20px 22px 30px; max-width: 1500px; width: 100%; margin:
   margin-bottom: 16px;
 }
 
+.movement-overview-row { cursor: pointer; }
+.movement-overview-row:hover td { background: rgba(168, 224, 95, 0.04); }
+
 .discovery-cats { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 4px 0 10px; color: var(--muted); font-size: 11px; }
 .discovery-cats label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .discovery-cats input { accent-color: var(--accent); }

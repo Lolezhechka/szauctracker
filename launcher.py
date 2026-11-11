@@ -82,7 +82,7 @@ ORANGE = "#e8a94a"
 class LauncherWindow:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("SZAUCTRACKER 2.4")
+        self.root.title("SZAUCTRACKER 2.5")
         self.root.configure(bg=BG)
         self.root.geometry("470x310")
         self.root.minsize(430, 300)
@@ -115,7 +115,7 @@ class LauncherWindow:
         titles.pack(side="left", fill="x", expand=True)
         tk.Label(titles, text="SZAUCTRACKER", bg=BG, fg=TEXT,
                  font=("Segoe UI", 14, "bold")).pack(anchor="w")
-        tk.Label(titles, text="сканер аукциона STALZONE · v2.4", bg=BG, fg=MUTED,
+        tk.Label(titles, text="сканер аукциона STALZONE · v2.5", bg=BG, fg=MUTED,
                  font=("Segoe UI", 9)).pack(anchor="w")
 
         divider = tk.Frame(self.root, bg=LINE, height=1)

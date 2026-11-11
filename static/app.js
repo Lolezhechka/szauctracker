@@ -1525,6 +1525,31 @@ function renderMovement(data) {
   }).join("");
 }
 
+async function loadMovementOverview() {
+  const days = Number($("#movementDays").value || 7);
+  try {
+    const data = await api(`/api/movement/overview?days=${days}`);
+    const rows = (data.items || []).slice(0, 50);
+    $("#movementOverviewInfo").textContent = rows.length
+      ? `топ ${rows.length} из ${data.items.length} · ${data.days} дн.`
+      : `${data.days} дн.`;
+    $("#movementOverviewBody").innerHTML = rows.map((row) => `
+      <tr class="movement-overview-row" data-mv-item="${esc(row.item)}">
+        <td><div class="item-line"><img class="item-icon" loading="lazy" src="/api/icon?item=${encodeURIComponent(row.item)}" alt="" onerror="this.classList.add('missing')"><div><div class="item-name">${esc(row.name)}</div><div class="item-meta">${esc(row.item)}</div></div></div></td>
+        <td class="num">${money(row.supply_lots)} / ${money(row.supply_units)}</td>
+        <td class="num">${money(row.appeared || 0)}</td>
+        <td class="num">${money(row.sold || 0)}</td>
+        <td class="num">${money(row.closed || 0)}</td>
+        <td class="num">${row.sold_pct == null ? "—" : pct(row.sold_pct)}</td>
+        <td class="num">${moneyFine(row.median_ask)}</td>
+        <td class="num">${row.avg_lifetime_hours == null ? "—" : `${row.avg_lifetime_hours} ч`}</td>
+      </tr>`).join("");
+  } catch (error) {
+    $("#movementOverviewInfo").textContent = `Ошибка: ${error.message}`;
+    $("#movementOverviewBody").innerHTML = "";
+  }
+}
+
 async function loadMovement() {
   const item = $("#movementItem") ? $("#movementItem").value : "";
   if (!item) return;
@@ -1543,6 +1568,7 @@ async function loadMovement() {
 
 async function ensureMovement() {
   if (!$("#movementItem") || !$("#movementItem").options.length) await renderMovementItems();
+  await loadMovementOverview();
   if (!state.movement.item) state.movement.item = ((state.config && state.config.watchlist) || [])[0] || null;
   if (!state.movement.item) return;
   const select = $("#movementItem");
@@ -1555,8 +1581,17 @@ function bindMovement() {
   const daysSelect = $("#movementDays");
   if (!itemSelect || !daysSelect) return;
   itemSelect.addEventListener("change", loadMovement);
-  daysSelect.addEventListener("change", loadMovement);
-  $("#movementRefresh").addEventListener("click", loadMovement);
+  daysSelect.addEventListener("change", () => { loadMovement(); loadMovementOverview(); });
+  $("#movementRefresh").addEventListener("click", () => { loadMovement(); loadMovementOverview(); });
+  $("#movementOverviewBody").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-mv-item]");
+    if (!row) return;
+    const item = row.getAttribute("data-mv-item");
+    if (![...itemSelect.options].some((option) => option.value === item)) itemSelect.add(new Option(item, item));
+    itemSelect.value = item;
+    state.movement.item = item;
+    loadMovement();
+  });
 }
 
 // ------------------------------------------------------------------ бартер

@@ -372,6 +372,63 @@ class MarketStore:
             "signals": items,
         }
 
+    def overview(self, days: float = 7) -> list[dict]:
+        days = max(0.25, min(90.0, float(days)))
+        cutoff = time.time() - days * 86400
+        with self._lock:
+            active = self._conn.execute(
+                "SELECT item, amount, unit FROM lots WHERE status='active' AND last_seen>=?",
+                (cutoff,),
+            ).fetchall()
+            events = self._conn.execute(
+                "SELECT item, event, COUNT(*) FROM events WHERE at>=? GROUP BY item, event",
+                (cutoff,),
+            ).fetchall()
+            closed = self._conn.execute(
+                "SELECT item, first_seen, closed_at FROM lots "
+                "WHERE status!='active' AND closed_at>=?",
+                (cutoff,),
+            ).fetchall()
+        rows: dict[str, dict] = {}
+        prices: dict[str, list[float]] = {}
+        for item, amount, unit in active:
+            row = rows.setdefault(item, {"item": item})
+            row["supply_lots"] = row.get("supply_lots", 0) + 1
+            row["supply_units"] = row.get("supply_units", 0) + int(amount or 0)
+            if unit:
+                prices.setdefault(item, []).append(float(unit))
+        for item, event, count in events:
+            row = rows.setdefault(item, {"item": item})
+            row[event] = int(count)
+        lifetimes: dict[str, list[float]] = {}
+        for item, first_seen, closed_at in closed:
+            if first_seen and closed_at and closed_at > first_seen:
+                lifetimes.setdefault(item, []).append((float(closed_at) - float(first_seen)) / 3600.0)
+        for item, values in lifetimes.items():
+            row = rows.setdefault(item, {"item": item})
+            row["avg_lifetime_hours"] = round(sum(values) / len(values), 2)
+        for item, values in prices.items():
+            values.sort()
+            row = rows.setdefault(item, {"item": item})
+            row["median_ask"] = round(values[len(values) // 2], 2)
+        result = []
+        for item, row in rows.items():
+            sold = int(row.get("probable_sold", 0))
+            closed_count = int(row.get("expired", 0)) + int(row.get("missing", 0))
+            disappeared = sold + closed_count
+            row["sold"] = sold
+            row["closed"] = closed_count
+            row["disappeared"] = disappeared
+            row["sold_pct"] = round(100.0 * sold / disappeared, 1) if disappeared else None
+            row.setdefault("supply_lots", 0)
+            row.setdefault("supply_units", 0)
+            row.setdefault("appeared", 0)
+            row.setdefault("median_ask", None)
+            row.setdefault("avg_lifetime_hours", None)
+            result.append(row)
+        result.sort(key=lambda row: (-row["sold"], -row["disappeared"], -row["supply_lots"]))
+        return result[:200]
+
     def summary(self, item: str, days: float = 7) -> dict:
         days = max(0.25, min(90.0, float(days)))
         cutoff = time.time() - days * 86400

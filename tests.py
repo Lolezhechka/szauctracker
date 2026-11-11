@@ -1418,6 +1418,26 @@ class SignalJournalTests(unittest.TestCase):
             store.close()
 
 
+class MovementOverviewTests(unittest.TestCase):
+    def test_overview_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MarketStore(Path(tmp) / "market.db")
+            now = datetime.now(timezone.utc)
+            lot = {"amount": 1, "buyoutPrice": 1000, "endTime": iso(now + timedelta(hours=2)), "additional": {}}
+            store.observe("item", [lot], now=now)
+            sale = {"amount": 1, "price": 1000, "time": iso(now + timedelta(minutes=1)), "additional": {}}
+            store.observe("item", [], now=now + timedelta(minutes=2), sales=[sale])
+            store.observe("item2", [dict(lot, buyoutPrice=500)], now=now)
+            store.observe("item2", [], now=now + timedelta(minutes=2))
+            rows = store.overview(7)
+            by_item = {row["item"]: row for row in rows}
+            self.assertEqual(by_item["item"]["sold"], 1)
+            self.assertEqual(by_item["item"]["supply_lots"], 0)
+            self.assertEqual(by_item["item2"]["closed"], 1)
+            self.assertEqual(by_item["item2"]["sold_pct"], 0.0)
+            store.close()
+
+
 class BackupTests(unittest.TestCase):
     def test_history_and_market_backup(self):
         with tempfile.TemporaryDirectory() as tmp:

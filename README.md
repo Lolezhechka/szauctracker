@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-2.4.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.4/SZAUCTRACKER-Setup-2.4.exe)
+  [SZAUCTRACKER-Setup-2.5.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.5/SZAUCTRACKER-Setup-2.5.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.4/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.5/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 2.4 в свойствах Windows.
+   иконка и версия 2.5 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -217,6 +217,8 @@ Portable-версия ничего не устанавливает: все да�
 * предупреждение, если компонента не хватает на рынке или у него нет цены.
 
 **Движение**
+* общий обзор по предметам: активные лоты/штуки, появления, вероятные продажи, закрытия, доля продаж, медиана и среднее время жизни;
+* клик по строке открывает детальный график и журнал выбранного предмета;
 * журнал активных лотов между сканами: появление, изменение цены, исчезновение;
 * «вероятно продан» сопоставляется с продажами по количеству, цене и времени;
 * «истёк» — лот исчез после endTime, «пропал» — до endTime без найденной продажи;
@@ -418,7 +420,7 @@ barter.py           бартерный калькулятор и котиров�
 fast_monitor.py     быстрый мониторинг новых лотов
 market_store.py     журнал жизненного цикла лотов (SQLite)
 static/             интерфейс (HTML/CSS/JS без внешних зависимостей)
-tests.py            100 тестов логики
+tests.py            101 тест логики
 start.bat           запуск из исходников в Windows
 SZAUCTRACKER.spec  конфигурация PyInstaller для пересборки
 make_icon.py        генератор иконки (все размеры ICO, включая 16×16)
@@ -453,7 +455,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-2.4.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-2.5.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты

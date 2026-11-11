@@ -1053,6 +1053,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, _compact_results(self.state.manager.results or {}))
             elif path == "/api/analytics":
                 self._analytics(query)
+            elif path == "/api/movement/overview":
+                self._movement_overview(query)
             elif path == "/api/movement":
                 self._movement(query)
             elif path == "/api/barter/items":
@@ -1346,6 +1348,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _movement_overview(self, query) -> None:
+        try:
+            days = float((query.get("days") or ["7"])[0])
+        except ValueError:
+            days = 7.0
+        days = max(1.0, min(90.0, days))
+        market = self.state.market
+        if market is None:
+            self._json(200, {"days": days, "items": [], "error": "Журнал недоступен"})
+            return
+        try:
+            rows = market.overview(days)
+        except Exception as exc:
+            self._error(500, f"Не удалось прочитать обзор движения: {exc}")
+            return
+        for row in rows:
+            meta = self.state.catalog.get(row["item"])
+            row["name"] = row["item"]
+            row["category"] = "other"
+            if meta:
+                row["name"] = meta["name"].get("ru") or meta["name"].get("en") or row["item"]
+                row["category"] = meta.get("category", "other")
+        self._json(200, {"days": days, "items": rows})
 
     def _movement(self, query) -> None:
         item = (query.get("item") or [""])[0].strip()
