@@ -652,14 +652,6 @@ class ScanManager:
             results["invalid_items"] = invalid
             self.discovery_cursor = int(results.get("discovery_next") or self.discovery_cursor)
             self._save_discovery_cursor()
-            if self.market_store is not None:
-                try:
-                    self.market_store.record_signals(
-                        results.get("deals") or [],
-                        results.get("generated_ts") or time.time(),
-                    )
-                except Exception as exc:
-                    log_line(f"Журнал сигналов: {exc}")
             self.results = results
             self._save_results(results)
             self.phase = "готово"
@@ -739,10 +731,6 @@ class AppState:
             self.market = MarketStore(MARKET_PATH)
         except Exception as exc:
             log_line(f"Журнал лотов недоступен: {exc}")
-        self.barter = BarterBook(BARTER_PATH)
-        self.barter.load_async()
-        self.barter_prices = {}
-        self.barter_lock = threading.Lock()
         self.manager = ScanManager(self.store, self.catalog, self.history, self.dead, self.market)
         self.fast = FastMonitor(self.store, self.catalog, self.manager, CACHE_DIR, log_line, self.history)
         self.fast.start()
@@ -1057,18 +1045,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._movement_overview(query)
             elif path == "/api/movement":
                 self._movement(query)
-            elif path == "/api/barter/items":
-                self._barter_items()
-            elif path == "/api/barter":
-                self._barter(query)
             elif path == "/api/fast":
                 self._json(200, self.state.fast.snapshot())
             elif path == "/api/icon":
                 self._icon(query)
             elif path == "/api/backup":
                 self._backup()
-            elif path == "/api/signals":
-                self._signals(query)
             elif path == "/api/update":
                 self._update()
             elif path == "/api/autostart":

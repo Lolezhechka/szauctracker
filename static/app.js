@@ -199,17 +199,13 @@ function bindTabs() {
     switchTab(tab.dataset.tab);
     if (tab.dataset.tab === "analytics") ensureAnalytics();
     if (tab.dataset.tab === "movement") ensureMovement();
-    if (tab.dataset.tab === "signals") ensureSignals();
-    if (tab.dataset.tab === "barter") ensureBarter();
     if (tab.dataset.tab === "portfolio") ensurePortfolio();
   }));
   const initial = location.hash.replace("#", "");
-  if (["deals", "stacks", "analytics", "movement", "signals", "barter", "portfolio", "watch", "settings"].includes(initial)) {
+  if (["deals", "stacks", "analytics", "movement", "portfolio", "watch", "settings"].includes(initial)) {
     switchTab(initial);
     if (initial === "analytics") ensureAnalytics();
     if (initial === "movement") ensureMovement();
-    if (initial === "signals") ensureSignals();
-    if (initial === "barter") ensureBarter();
     if (initial === "portfolio") ensurePortfolio();
   }
 }
@@ -2343,8 +2339,6 @@ async function init() {
   bindStacks();
   bindAnalytics();
   bindMovement();
-  bindSignals();
-  bindBarter();
   bindPortfolio();
   bindRuleEditor();
   bindWatch();

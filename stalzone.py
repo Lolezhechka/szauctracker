@@ -29,7 +29,7 @@ BASE_DEMO = "https://dapi.stalzone.net"
 DEMO_CLIENT_ID = "1"
 DEMO_CLIENT_SECRET = "E98cm6J9NNjTQopph0c2eIXNKafg4R1Cjz0TZh2D"
 
-USER_AGENT = "SZAUCTRACKER/2.5 (local tool)"
+USER_AGENT = "SZAUCTRACKER/2.6 (local tool)"
 
 REGIONS = [
     {"id": "RU", "name": "Россия"},
