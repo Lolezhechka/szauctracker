@@ -30,6 +30,7 @@
   <button class="tab" data-tab="stacks">Стаки <span id="stacksBadge" class="badge muted">0</span></button>
   <button class="tab" data-tab="analytics">Аналитика</button>
   <button class="tab" data-tab="movement">Движение</button>
+  <button class="tab" data-tab="signals">Сигналы</button>
   <button class="tab" data-tab="barter">Бартер</button>
   <button class="tab" data-tab="portfolio">Портфель</button>
   <button class="tab" data-tab="watch">Наблюдение <span id="watchBadge" class="badge">0</span></button>
@@ -335,6 +336,44 @@
       </table>
     </div>
     <div class="empty" id="movementEmpty">Нет накопленных наблюдений. Оставьте приложение запущенным — журнал заполнится при следующих сканах.</div>
+  </div>
+</section>
+
+<!-- ============================ СИГНАЛЫ ============================ -->
+<section id="tab-signals" class="tab-panel">
+  <div class="toolbar">
+    <select id="signalsDays" class="input select">
+      <option value="1">24 часа</option>
+      <option value="7" selected>7 дней</option>
+      <option value="30">30 дней</option>
+      <option value="90">90 дней</option>
+    </select>
+    <select id="signalsOutcome" class="input select">
+      <option value="">Все исходы</option>
+      <option value="active">Активные</option>
+      <option value="sold">Вероятно проданы</option>
+      <option value="closed">Закрыты без продажи</option>
+    </select>
+    <button type="button" id="signalsRefresh" class="btn">Обновить</button>
+  </div>
+
+  <div class="summary five">
+    <div class="stat"><span class="stat-label">Сигналов</span><strong id="sgTotal">—</strong><span class="stat-sub">за период</span></div>
+    <div class="stat"><span class="stat-label">Активные</span><strong id="sgActive">—</strong><span class="stat-sub" id="sgActiveSub">потенциал</span></div>
+    <div class="stat accent"><span class="stat-label">Вероятно проданы</span><strong id="sgSold">—</strong><span class="stat-sub" id="sgHit">hit rate</span></div>
+    <div class="stat"><span class="stat-label">Закрыты без продажи</span><strong id="sgClosed">—</strong><span class="stat-sub">истёк или пропал</span></div>
+    <div class="stat"><span class="stat-label">Профит по проданным</span><strong id="sgProfit">—</strong><span class="stat-sub">оценка</span></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Журнал сигналов</h2><span id="signalsInfo" class="muted"></span></div>
+    <div class="table-wrap">
+      <table class="table compact">
+        <thead><tr><th>Время</th><th>Предмет</th><th class="num">Цена / шт.</th><th class="num">База</th><th class="num">Скидка</th><th class="num">Оценка</th><th>Источник</th><th>Исход</th></tr></thead>
+        <tbody id="signalsBody"></tbody>
+      </table>
+    </div>
+    <div class="empty hidden" id="signalsEmpty">Пока нет сохранённых сигналов. Они появятся после следующего скана с найденными сделками.</div>
   </div>
 </section>
 

@@ -17,6 +17,7 @@ const state = {
   deadItems: [],
   analytics: { item: null, days: 7, variant: null, data: null },
   movement: { item: null, days: 7, data: null },
+  signals: { days: 7, data: null },
   barter: { items: null, item: null, data: null, ready: false, error: null },
   fast: { events: [], seen: null, data: null },
   portfolio: null,
@@ -198,14 +199,16 @@ function bindTabs() {
     switchTab(tab.dataset.tab);
     if (tab.dataset.tab === "analytics") ensureAnalytics();
     if (tab.dataset.tab === "movement") ensureMovement();
+    if (tab.dataset.tab === "signals") ensureSignals();
     if (tab.dataset.tab === "barter") ensureBarter();
     if (tab.dataset.tab === "portfolio") ensurePortfolio();
   }));
   const initial = location.hash.replace("#", "");
-  if (["deals", "stacks", "analytics", "movement", "barter", "portfolio", "watch", "settings"].includes(initial)) {
+  if (["deals", "stacks", "analytics", "movement", "signals", "barter", "portfolio", "watch", "settings"].includes(initial)) {
     switchTab(initial);
     if (initial === "analytics") ensureAnalytics();
     if (initial === "movement") ensureMovement();
+    if (initial === "signals") ensureSignals();
     if (initial === "barter") ensureBarter();
     if (initial === "portfolio") ensurePortfolio();
   }
@@ -1655,6 +1658,71 @@ function renderFast(data) {
     </div>`).join("");
 }
 
+// ------------------------------------------------------------------ сигналы
+
+const SIGNAL_OUTCOME_LABELS = {
+  active: "активен",
+  sold: "вероятно продан",
+  closed: "закрыт",
+  unknown: "—",
+};
+
+async function loadSignals() {
+  const days = Number($("#signalsDays").value || 7);
+  state.signals.days = days;
+  try {
+    const data = await api(`/api/signals?days=${days}`);
+    state.signals.data = data;
+    renderSignals(data);
+  } catch (error) {
+    $("#signalsInfo").textContent = `Ошибка: ${error.message}`;
+    $("#signalsBody").innerHTML = "";
+    $("#signalsEmpty").classList.remove("hidden");
+  }
+}
+
+function renderSignals(data) {
+  const counts = data.counts || {};
+  $("#sgTotal").textContent = money(data.total || 0);
+  $("#sgActive").textContent = money(counts.active || 0);
+  $("#sgActiveSub").textContent = `${money(data.active_profit || 0)} потенциал`;
+  $("#sgSold").textContent = money(counts.sold || 0);
+  $("#sgHit").textContent = data.hit_rate_pct == null ? "нет закрытых" : `hit rate ${pct(data.hit_rate_pct)}`;
+  $("#sgClosed").textContent = money(counts.closed || 0);
+  $("#sgProfit").textContent = money(data.sold_profit || 0);
+  $("#signalsInfo").textContent = `за ${data.days || 0} дн. · ${data.total || 0} сигналов`;
+  const outcome = $("#signalsOutcome").value;
+  const rows = (data.signals || []).filter((row) => !outcome || row.outcome === outcome);
+  $("#signalsBody").innerHTML = rows.map((row) => {
+    const outcomeClass = row.outcome === "sold" ? "discovery" : row.outcome === "closed" ? "bad" : row.outcome === "active" ? "" : "warn";
+    return `<tr>
+      <td>${esc(dateTime(row.first_at))}</td>
+      <td><div class="item-line"><img class="item-icon" loading="lazy" src="/api/icon?item=${encodeURIComponent(row.item)}" alt="" onerror="this.classList.add('missing')"><div><div class="item-name">${esc(row.name)}</div><div class="item-meta">${esc(row.item)}${row.amount > 1 ? ` · ${money(row.amount)} шт.` : ""}</div></div></div></td>
+      <td class="num">${moneyFine(row.unit)}</td>
+      <td class="num">${moneyFine(row.benchmark)}</td>
+      <td class="num disc">${row.discount_pct == null ? "—" : pct(row.discount_pct)}</td>
+      <td class="num">${row.score == null ? "—" : row.score}</td>
+      <td>${esc(row.source === "discovery" ? "вне списка" : "наблюдение")}</td>
+      <td><span class="tag ${outcomeClass}" title="Оценка ${moneyFine(row.total_net)}">${esc(SIGNAL_OUTCOME_LABELS[row.outcome] || row.outcome)}</span></td>
+    </tr>`;
+  }).join("");
+  $("#signalsEmpty").classList.toggle("hidden", rows.length > 0);
+}
+
+async function ensureSignals() {
+  await loadSignals();
+}
+
+function bindSignals() {
+  const refresh = $("#signalsRefresh");
+  if (!refresh) return;
+  refresh.addEventListener("click", loadSignals);
+  $("#signalsDays").addEventListener("change", loadSignals);
+  $("#signalsOutcome").addEventListener("change", () => {
+    if (state.signals.data) renderSignals(state.signals.data);
+  });
+}
+
 function bindAnalytics() {
   const itemSelect = $("#analyticsItem");
   const daysSelect = $("#analyticsDays");
@@ -2100,6 +2168,7 @@ async function init() {
   bindStacks();
   bindAnalytics();
   bindMovement();
+  bindSignals();
   bindBarter();
   bindPortfolio();
   bindRuleEditor();

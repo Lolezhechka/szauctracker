@@ -15,7 +15,7 @@ from barter import BarterBook, calculate_item
 from fast_monitor import FastMonitor
 from catalog import Catalog
 from history_store import HistoryStore
-from market_store import MarketStore
+from market_store import MarketStore, _sig_base
 from portfolio import PortfolioStore
 from stalzone import BASE_DEMO, BASE_PROD, DiskCache
 from scanner import analyze_item, compute_stats, fetch_history, group_key, scan, stack_band
@@ -1340,6 +1340,50 @@ class MarketStoreTests(unittest.TestCase):
             counts = store.observe("item", [lot, dict(lot)], now=now)
             self.assertEqual(counts["appeared"], 2)
             self.assertEqual(store.total("item"), 2)
+            store.close()
+
+
+class SignalJournalTests(unittest.TestCase):
+    def test_signal_outcomes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MarketStore(Path(tmp) / "market.db")
+            now = datetime.now(timezone.utc)
+            lot = {
+                "amount": 1,
+                "buyoutPrice": 800,
+                "endTime": iso(now + timedelta(hours=2)),
+                "additional": {"qlt": 2, "ptn": 15},
+            }
+            store.observe("item", [lot], now=now)
+            sig = _sig_base("item", lot)
+            deal = {
+                "item_id": "item",
+                "name": "Item",
+                "benchmark": 1000,
+                "discount_pct": 20,
+                "score": 80,
+                "source": "watch",
+                "signal_lots": [
+                    {"sig": sig, "amount": 1, "unit": 800, "net": 100}
+                ],
+            }
+            self.assertEqual(store.record_signals([deal], now), 1)
+            self.assertEqual(store.record_signals([deal], now + timedelta(minutes=1)), 0)
+            summary = store.signals(7)
+            self.assertEqual(summary["total"], 1)
+            self.assertEqual(summary["counts"]["active"], 1)
+
+            sale = {
+                "amount": 1,
+                "price": 800,
+                "time": iso(now + timedelta(minutes=2)),
+                "additional": {"qlt": 2, "ptn": 15},
+            }
+            store.observe("item", [], now=now + timedelta(minutes=3), sales=[sale])
+            summary = store.signals(7)
+            self.assertEqual(summary["counts"]["sold"], 1)
+            self.assertEqual(summary["hit_rate_pct"], 100.0)
+            self.assertEqual(summary["sold_profit"], 100)
             store.close()
 
 

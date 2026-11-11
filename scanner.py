@@ -7,6 +7,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
+from lot_utils import lot_signature
 from stalzone import ApiError
 
 QUALITY_LABELS = {
@@ -712,12 +713,14 @@ def _aggregate_deals(deals: list[dict]) -> list[dict]:
             row["total_net"] = float(deal.get("total_net") or 0)
             row["total_cost"] = float(deal.get("total_cost") or 0)
             row["aggregated"] = False
+            row["signal_lots"] = list(deal.get("signal_lots") or [])
             grouped[key] = row
         else:
             current["lots_count"] += 1
             current["amount"] += int(deal.get("amount") or 0)
             current["total_net"] += float(deal.get("total_net") or 0)
             current["total_cost"] += float(deal.get("total_cost") or 0)
+            current["signal_lots"] = list(current.get("signal_lots") or []) + list(deal.get("signal_lots") or [])
             deal_left = deal.get("time_left_min")
             current_left = current.get("time_left_min")
             if deal_left is not None and (current_left is None or deal_left < current_left):
@@ -804,6 +807,7 @@ def analyze_item(
                 "start_price": start_price,
                 "amount": amount,
                 "end_time": end,
+                "end_time_raw": row.get("endTime"),
                 "additional": additional,
             }
         )
@@ -1085,6 +1089,23 @@ def analyze_item(
                     "end_time": end.isoformat() if end else None,
                     "additional": lot_additional,
                     "coverage": coverage,
+                    "signal_lots": [
+                        {
+                            "sig": lot_signature(
+                                item_id,
+                                {
+                                    "amount": int(lot["amount"]),
+                                    "endTime": lot.get("end_time_raw"),
+                                    "additional": lot_additional,
+                                },
+                            ),
+                            "amount": int(lot["amount"]),
+                            "unit": round(unit, 2),
+                            "buyout": lot["buyout"],
+                            "end_time": end.isoformat() if end else None,
+                            "net": round(net_unit * int(lot["amount"]), 2),
+                        }
+                    ],
                 }
             )
             group_deals += 1

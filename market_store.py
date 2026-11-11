@@ -7,13 +7,14 @@ API не отдаёт lotId, поэтому лот идентифицирует�
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from lot_utils import lot_signature
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS lots (
@@ -49,22 +50,31 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_item_at ON events(item, at);
 CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
+
+CREATE TABLE IF NOT EXISTS signals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    item         TEXT NOT NULL,
+    sig          TEXT NOT NULL,
+    first_at     REAL NOT NULL,
+    last_at      REAL NOT NULL,
+    name         TEXT NOT NULL,
+    amount       INTEGER NOT NULL,
+    unit         REAL NOT NULL,
+    benchmark    REAL,
+    discount_pct REAL,
+    score        REAL,
+    source       TEXT,
+    end_ts       REAL,
+    total_net    REAL,
+    UNIQUE(item, sig)
+);
+CREATE INDEX IF NOT EXISTS idx_signals_first ON signals(first_at);
+CREATE INDEX IF NOT EXISTS idx_signals_item ON signals(item);
 """
 
 
 def _sig_base(item: str, lot: dict) -> str:
-    additional = lot.get("additional") if isinstance(lot.get("additional"), dict) else {}
-    payload = {
-        "item": item,
-        "amount": int(lot.get("amount") or 0),
-        "end": str(lot.get("endTime") or ""),
-        "qlt": additional.get("qlt"),
-        "ptn": additional.get("ptn"),
-        "bp": additional.get("bonus_properties"),
-        "sp": additional.get("spawn_time"),
-    }
-    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    return lot_signature(item, lot)
 
 
 def _unit(lot: dict) -> float:
@@ -253,7 +263,114 @@ class MarketStore:
             ),
         )
 
+    def record_signals(self, deals: list[dict], now: datetime | float | None = None) -> int:
+        """Сохраняет рекомендации по конкретным лотам для последующей проверки."""
+        now_ts = now.timestamp() if isinstance(now, datetime) else (float(now) if now else time.time())
+        inserted = 0
+        with self._lock:
+            for deal in deals or []:
+                item = str(deal.get("item_id") or "")
+                if not item:
+                    continue
+                for lot in deal.get("signal_lots") or []:
+                    sig = str(lot.get("sig") or "")
+                    if not sig:
+                        continue
+                    amount = int(lot.get("amount") or 0)
+                    unit = float(lot.get("unit") or 0)
+                    if amount <= 0 or unit <= 0:
+                        continue
+                    end_ts = _iso_ts(lot.get("end_time"))
+                    cursor = self._conn.execute(
+                        "INSERT OR IGNORE INTO signals "
+                        "(item, sig, first_at, last_at, name, amount, unit, benchmark, "
+                        "discount_pct, score, source, end_ts, total_net) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            item, sig, now_ts, now_ts, str(deal.get("name") or item),
+                            amount, unit, deal.get("benchmark"), deal.get("discount_pct"),
+                            deal.get("score"), deal.get("source"), end_ts,
+                            lot.get("net", deal.get("total_net")),
+                        ),
+                    )
+                    inserted += cursor.rowcount
+                    self._conn.execute(
+                        "UPDATE signals SET last_at=?, name=?, benchmark=?, "
+                        "discount_pct=MAX(COALESCE(discount_pct, 0), ?), "
+                        "score=MAX(COALESCE(score, 0), ?), source=?, total_net=MAX(COALESCE(total_net, 0), ?) "
+                        "WHERE item=? AND sig=?",
+                        (
+                            now_ts, str(deal.get("name") or item), deal.get("benchmark"),
+                            deal.get("discount_pct") or 0, deal.get("score") or 0,
+                            deal.get("source"), lot.get("net", deal.get("total_net")) or 0, item, sig,
+                        ),
+                    )
+            self._conn.commit()
+        return inserted
+
     # ------------------------------------------------------------------ чтение
+
+    def signals(self, days: float = 7) -> dict:
+        days = max(0.25, min(90.0, float(days)))
+        cutoff = time.time() - days * 86400
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT s.item, s.sig, s.first_at, s.last_at, s.name, s.amount, s.unit, "
+                "s.benchmark, s.discount_pct, s.score, s.source, s.end_ts, s.total_net, "
+                "l.status, l.closed_at "
+                "FROM signals s LEFT JOIN lots l ON s.item=l.item AND s.sig=l.sig "
+                "WHERE s.first_at>=? ORDER BY s.first_at DESC LIMIT 500",
+                (cutoff,),
+            ).fetchall()
+        counts = {"active": 0, "sold": 0, "closed": 0, "unknown": 0}
+        sold_profit = 0.0
+        active_profit = 0.0
+        items = []
+        for row in rows:
+            (item, sig, first_at, last_at, name, amount, unit, benchmark,
+             discount, score, source, end_ts, total_net, lot_status, closed_at) = row
+            if lot_status == "probable_sold":
+                outcome = "sold"
+                sold_profit += float(total_net or 0)
+            elif lot_status in ("expired", "missing"):
+                outcome = "closed"
+            elif lot_status == "active":
+                outcome = "active"
+                active_profit += float(total_net or 0)
+            else:
+                outcome = "unknown"
+            counts[outcome] += 1
+            items.append(
+                {
+                    "item": item,
+                    "sig": sig,
+                    "name": name,
+                    "first_at": datetime.fromtimestamp(float(first_at), timezone.utc).isoformat(),
+                    "last_at": datetime.fromtimestamp(float(last_at), timezone.utc).isoformat(),
+                    "amount": int(amount or 0),
+                    "unit": round(float(unit or 0), 2),
+                    "benchmark": round(float(benchmark), 2) if benchmark else None,
+                    "discount_pct": round(float(discount), 1) if discount is not None else None,
+                    "score": round(float(score), 1) if score is not None else None,
+                    "source": source,
+                    "total_net": round(float(total_net or 0), 2),
+                    "outcome": outcome,
+                    "closed_at": (
+                        datetime.fromtimestamp(float(closed_at), timezone.utc).isoformat()
+                        if closed_at else None
+                    ),
+                }
+            )
+        closed = counts["sold"] + counts["closed"]
+        return {
+            "days": days,
+            "total": len(rows),
+            "counts": counts,
+            "hit_rate_pct": round(100.0 * counts["sold"] / closed, 1) if closed else None,
+            "sold_profit": round(sold_profit, 2),
+            "active_profit": round(active_profit, 2),
+            "signals": items,
+        }
 
     def summary(self, item: str, days: float = 7) -> dict:
         days = max(0.25, min(90.0, float(days)))
@@ -353,8 +470,9 @@ class MarketStore:
                 "DELETE FROM lots WHERE (status!='active' AND closed_at < ?) OR last_seen < ?",
                 (cutoff, cutoff),
             ).rowcount
+            signals = self._conn.execute("DELETE FROM signals WHERE first_at < ?", (cutoff,)).rowcount
             self._conn.commit()
-        return int(events + lots)
+        return int(events + lots + signals)
 
     def checkpoint(self) -> None:
         with self._lock:

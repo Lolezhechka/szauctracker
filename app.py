@@ -628,6 +628,14 @@ class ScanManager:
             results["invalid_items"] = invalid
             self.discovery_cursor = int(results.get("discovery_next") or self.discovery_cursor)
             self._save_discovery_cursor()
+            if self.market_store is not None:
+                try:
+                    self.market_store.record_signals(
+                        results.get("deals") or [],
+                        results.get("generated_ts") or time.time(),
+                    )
+                except Exception as exc:
+                    log_line(f"Журнал сигналов: {exc}")
             self.results = results
             self._save_results(results)
             self.phase = "готово"
@@ -944,7 +952,7 @@ def _icon_candidates(item: str, category: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/2.0"
+    server_version = "SZAUCTRACKER/2.1"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -1032,6 +1040,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._icon(query)
             elif path == "/api/backup":
                 self._backup()
+            elif path == "/api/signals":
+                self._signals(query)
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":
@@ -1273,7 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"main/global/icons/{candidate}"
             )
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.1"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     data = resp.read()
                 if not data:
@@ -1324,6 +1334,23 @@ class Handler(BaseHTTPRequestHandler):
             category = meta.get("category", "other")
         summary.update({"name": name, "category": category})
         self._json(200, summary)
+
+    def _signals(self, query) -> None:
+        try:
+            days = float((query.get("days") or ["7"])[0])
+        except ValueError:
+            days = 7.0
+        days = max(1.0, min(90.0, days))
+        market = self.state.market
+        if market is None:
+            self._json(200, {"days": days, "total": 0, "signals": [], "error": "Журнал недоступен"})
+            return
+        try:
+            data = market.signals(days)
+        except Exception as exc:
+            self._error(500, f"Не удалось прочитать журнал сигналов: {exc}")
+            return
+        self._json(200, data)
 
     def _barter_items(self) -> None:
         book = self.state.barter

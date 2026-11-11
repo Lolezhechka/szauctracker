@@ -229,6 +229,8 @@ main { flex: 1; padding: 20px 22px 30px; max-width: 1500px; width: 100%; margin:
   margin-bottom: 16px;
 }
 
+.summary.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
 .stat {
   background: linear-gradient(180deg, var(--panel), var(--bg-soft));
   border: 1px solid var(--line-soft);
@@ -558,7 +560,7 @@ select.input { padding-right: 28px; }
 /* --------------------------------------------------------------- адаптив */
 
 @media (max-width: 1000px) {
-  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary, .summary.five { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split { grid-template-columns: 1fr; }
 }
 
