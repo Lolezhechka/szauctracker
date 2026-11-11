@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 RECIPES_URL = "https://raw.githubusercontent.com/EXBO-Studio/stalzone-database/main/global/barter_recipes.json"
-USER_AGENT = "SZAUCTRACKER/2.6 (local tool)"
+USER_AGENT = "SZAUCTRACKER/2.7 (local tool)"
 
 
 def _ru(value) -> str:

@@ -50,7 +50,7 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
     RESOURCE_DIR = BASE_DIR
 
-APP_VERSION = "2.4"
+APP_VERSION = "2.7"
 GITHUB_REPO = "Lolezhechka/szauctracker"
 DATA_DIR = BASE_DIR / "data"
 STATIC_DIR = RESOURCE_DIR / "static"
@@ -1027,6 +1027,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(
                     200,
                     {
+                        "version": APP_VERSION,
                         "config": _safe_config(config),
                         "regions": REGIONS,
                         "catalog_ready": self.state.catalog.ready,

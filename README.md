@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-2.6.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.6/SZAUCTRACKER-Setup-2.6.exe)
+  [SZAUCTRACKER-Setup-2.7.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.7/SZAUCTRACKER-Setup-2.7.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.6/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.7/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 2.6 в свойствах Windows.
+   иконка и версия 2.7 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -437,7 +437,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-2.6.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-2.7.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты
