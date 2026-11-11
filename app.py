@@ -971,7 +971,7 @@ def _icon_candidates(item: str, category: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/2.2"
+    server_version = "SZAUCTRACKER/2.3"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -1308,7 +1308,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"main/global/icons/{candidate}"
             )
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.2"})
+                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.3"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     data = resp.read()
                 if not data:

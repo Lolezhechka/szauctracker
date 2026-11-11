@@ -1558,6 +1558,25 @@ function bindMovement() {
 
 // ------------------------------------------------------------------ бартер
 
+function filterBarterItems(preferred) {
+  const select = $("#barterItem");
+  if (!select) return;
+  const query = ($("#barterSearch") ? $("#barterSearch").value : "").trim().toLowerCase();
+  const all = state.barter.items || [];
+  const items = query
+    ? all.filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(query))
+    : all;
+  if (!items.length) {
+    select.innerHTML = `<option value="">Нет совпадений</option>`;
+    return;
+  }
+  const current = preferred || select.value || state.barter.item;
+  select.innerHTML = items.map((item) => `<option value="${esc(item.id)}">${esc(item.name)} (${esc(item.id)})</option>`).join("");
+  const chosen = items.some((item) => item.id === current) ? current : items[0].id;
+  state.barter.item = chosen;
+  select.value = chosen;
+}
+
 async function renderBarterItems() {
   const select = $("#barterItem");
   if (!select) return;
@@ -1566,17 +1585,12 @@ async function renderBarterItems() {
     state.barter.ready = !!data.ready;
     state.barter.error = data.error || null;
     const items = (data.items || []).slice().sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    state.barter.items = items;
     if (!items.length) {
       select.innerHTML = `<option value="">${esc(data.error || "Нет рецептов")}</option>`;
-      state.barter.items = [];
       return;
     }
-    const current = select.value || state.barter.item;
-    select.innerHTML = items.map((item) => `<option value="${esc(item.id)}">${esc(item.name)} (${esc(item.id)})</option>`).join("");
-    const chosen = items.some((item) => item.id === current) ? current : items[0].id;
-    state.barter.item = chosen;
-    state.barter.items = items;
-    select.value = chosen;
+    filterBarterItems(select.value || state.barter.item);
   } catch (error) {
     select.innerHTML = `<option value="">Ошибка: ${esc(error.message)}</option>`;
     state.barter.error = error.message;
@@ -1610,25 +1624,43 @@ function barterOfferHtml(offer) {
   </div>`;
 }
 
+function filteredBarterOffers(data) {
+  let offers = (data.offers || []).slice();
+  if ($("#barterFull").checked) offers = offers.filter((offer) => offer.fully_priced);
+  if ($("#barterProfit").checked) offers = offers.filter((offer) => (offer.profit || 0) > 0);
+  const sort = $("#barterSort") ? $("#barterSort").value : "profit";
+  offers.sort((a, b) => {
+    if (sort === "margin") return (b.margin_pct ?? -1e18) - (a.margin_pct ?? -1e18);
+    if (sort === "cost") return (a.total_cost || 0) - (b.total_cost || 0);
+    return (b.profit ?? -1e18) - (a.profit ?? -1e18);
+  });
+  return offers;
+}
+
 function renderBarter(data) {
   const summary = data || {};
   const output = summary.output || {};
+  const offers = filteredBarterOffers(summary);
   $("#barterPrice").textContent = moneyFine(output.sales_median);
   $("#barterAsk").textContent = moneyFine(output.unit_min);
   $("#barterRecipes").textContent = money(summary.recipes || 0);
-  const best = summary.best;
+  $("#barterSales").textContent = money(output.sales_count || 0);
+  $("#barterSalesSub").textContent = `${money(output.sales_units || 0)} шт. в истории`;
+  const best = offers.find((offer) => offer.profit != null) || null;
   $("#barterBest").textContent = best && best.profit != null ? `${best.profit > 0 ? "+" : ""}${money(best.profit)}` : "—";
   $("#barterBestSub").textContent = best && best.margin_pct != null ? `${pct(best.margin_pct)} маржи` : "после комиссии";
-  $("#barterInfo").textContent = summary.name ? `${summary.name} · комиссия ${summary.commission_pct}%` : "";
+  $("#barterInfo").textContent = summary.name
+    ? `${summary.name} · ${offers.length} из ${summary.recipes || 0} рецептов · комиссия ${summary.commission_pct}%`
+    : "";
   const error = summary.error ? `<p class="hint warn">${esc(summary.error)}</p>` : "";
   const errors = summary.errors && Object.keys(summary.errors).length
     ? `<p class="hint warn">Не удалось получить цены: ${esc(Object.keys(summary.errors).join(", "))}</p>`
     : "";
-  if (!summary.offers || !summary.offers.length) {
-    $("#barterResult").innerHTML = `${error}${errors}<div class="empty">${esc(summary.error || "Для выбранного предмета нет рецептов.")}</div>`;
+  if (!offers.length) {
+    $("#barterResult").innerHTML = `${error}${errors}<div class="empty">${esc(summary.offers && summary.offers.length ? "Под фильтры ничего не подходит." : (summary.error || "Для выбранного предмета нет рецептов."))}</div>`;
     return;
   }
-  $("#barterResult").innerHTML = `${error}${errors}${summary.offers.map(barterOfferHtml).join("")}`;
+  $("#barterResult").innerHTML = `${error}${errors}${offers.map(barterOfferHtml).join("")}`;
 }
 
 async function loadBarter() {
@@ -1649,8 +1681,7 @@ async function ensureBarter() {
   if (!state.barter.items || !state.barter.items.length) await renderBarterItems();
   if (!state.barter.item) state.barter.item = (state.barter.items || [])[0]?.id || null;
   if (!state.barter.item) return;
-  const select = $("#barterItem");
-  if (select && [...select.options].some((option) => option.value === state.barter.item)) select.value = state.barter.item;
+  filterBarterItems(state.barter.item);
   if (!state.barter.data || state.barter.data.item !== state.barter.item) await loadBarter();
 }
 
@@ -1660,6 +1691,19 @@ function bindBarter() {
   if (!select || !refresh) return;
   select.addEventListener("change", loadBarter);
   refresh.addEventListener("click", loadBarter);
+  $("#barterSearch").addEventListener("input", () => filterBarterItems());
+  $("#barterSearch").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      loadBarter();
+    }
+  });
+  for (const id of ["barterFull", "barterProfit", "barterSort"]) {
+    const element = document.getElementById(id);
+    if (element) element.addEventListener("change", () => {
+      if (state.barter.data) renderBarter(state.barter.data);
+    });
+  }
 }
 
 // ------------------------------------------------------------------ быстрый мониторинг

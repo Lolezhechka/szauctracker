@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-2.2.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.2/SZAUCTRACKER-Setup-2.2.exe)
+  [SZAUCTRACKER-Setup-2.3.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.3/SZAUCTRACKER-Setup-2.3.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.2/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.3/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 2.2 в свойствах Windows.
+   иконка и версия 2.3 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -207,7 +207,10 @@ Portable-версия ничего не устанавливает: все да�
 * фильтр по периоду и исходу, история за 30 дней.
 
 **Бартер**
-* выбор выходного предмета из 514 рецептов;
+* поиск выходного предмета по названию или ID среди 514 рецептов;
+* фильтры «только с полными ценами» и «только прибыльные»;
+* сортировка по профиту, марже или себестоимости;
+* объём продаж выходного предмета;
 * цена продажи — медиана фактических продаж;
 * стоимость компонентов — по самым дешёвым активным лотам с учётом доступного количества;
 * деньги, себестоимость, профит и маржа после комиссии;
@@ -443,7 +446,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-2.2.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-2.3.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты

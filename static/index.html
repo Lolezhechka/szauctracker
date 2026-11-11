@@ -380,14 +380,23 @@
 <!-- ============================ БАРТЕР ============================ -->
 <section id="tab-barter" class="tab-panel">
   <div class="toolbar">
+    <input id="barterSearch" class="input" type="search" placeholder="Поиск предмета по названию или ID…" autocomplete="off">
     <select id="barterItem" class="input select"></select>
+    <label class="check"><input type="checkbox" id="barterFull"> только с полными ценами</label>
+    <label class="check"><input type="checkbox" id="barterProfit"> только прибыльные</label>
+    <select id="barterSort" class="input select">
+      <option value="profit">Сначала больше профит</option>
+      <option value="margin">Сначала больше маржа</option>
+      <option value="cost">Сначала дешевле себестоимость</option>
+    </select>
     <button type="button" id="barterRefresh" class="btn">Рассчитать</button>
   </div>
 
-  <div class="summary">
+  <div class="summary five">
     <div class="stat"><span class="stat-label">Медиана продаж</span><strong id="barterPrice">—</strong><span class="stat-sub">выходной предмет</span></div>
     <div class="stat"><span class="stat-label">Минимальный лот</span><strong id="barterAsk">—</strong><span class="stat-sub">текущий рынок</span></div>
     <div class="stat"><span class="stat-label">Рецептов</span><strong id="barterRecipes">—</strong><span class="stat-sub">вариантов обмена</span></div>
+    <div class="stat"><span class="stat-label">Продаж выхода</span><strong id="barterSales">—</strong><span class="stat-sub" id="barterSalesSub">шт. в истории</span></div>
     <div class="stat accent"><span class="stat-label">Лучший профит</span><strong id="barterBest">—</strong><span class="stat-sub" id="barterBestSub">после комиссии</span></div>
   </div>
 

@@ -1272,6 +1272,8 @@ class BarterTests(unittest.TestCase):
         self.assertEqual(offer["sale_price"], 1000)
         self.assertEqual(offer["profit"], 640)
         self.assertTrue(offer["available"])
+        self.assertTrue(offer["fully_priced"])
+        self.assertEqual(result["output"]["sales_count"], 1)
         self.assertEqual(result["name"], "out")
         self.assertEqual(client.lot_calls.count("out"), 1)
         self.assertEqual(client.lot_calls.count("comp"), 1)

@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 RECIPES_URL = "https://raw.githubusercontent.com/EXBO-Studio/stalzone-database/main/global/barter_recipes.json"
-USER_AGENT = "SZAUCTRACKER/2.2 (local tool)"
+USER_AGENT = "SZAUCTRACKER/2.3 (local tool)"
 
 
 def _ru(value) -> str:
@@ -282,10 +282,14 @@ def calculate_item(
                         "available_units": q.get("available_units", 0),
                         "enough": enough,
                         "sales_median": q.get("sales_median"),
+                        "sales_count": q.get("sales_count", 0),
                     }
                 )
             money = int(offer.get("cost") or 0)
             total_cost = money + component_cost
+            fully_priced = output_sale is not None and all(
+                part.get("unit") is not None for part in components
+            )
             revenue = output_sale * (1.0 - commission) if output_sale else None
             profit = revenue - total_cost if revenue is not None and available else None
             margin = (profit / total_cost * 100.0) if profit is not None and total_cost > 0 else None
@@ -302,6 +306,7 @@ def calculate_item(
                     "profit": round(profit, 2) if profit is not None else None,
                     "margin_pct": round(margin, 1) if margin is not None else None,
                     "available": available and output_sale is not None,
+                    "fully_priced": fully_priced,
                 }
             )
     offers_out.sort(key=lambda row: (-(row["profit"] or -10**18), row["total_cost"]))
@@ -317,6 +322,7 @@ def calculate_item(
             "unit_p25": output_quote.get("unit_p25"),
             "sales_median": output_quote.get("sales_median"),
             "sales_count": output_quote.get("sales_count", 0),
+            "sales_units": output_quote.get("sales_units", 0),
             "available_units": output_quote.get("available_units", 0),
         },
         "errors": errors,
