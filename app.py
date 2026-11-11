@@ -83,6 +83,12 @@ def seed_bundled_data() -> None:
 ITEM_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
 ALLOWED_REGIONS = {row["id"] for row in REGIONS}
 
+DISCOVERY_CATEGORIES = {
+    "artefact", "weapon", "armor", "attachment", "consumables",
+    "containers", "backpacks", "bullet", "device", "misc", "other",
+    "weapon_modules", "weapon_style", "armor_style",
+}
+
 DEFAULT_CONFIG = {
     "client_id": "",
     "client_secret": "",
@@ -104,6 +110,7 @@ DEFAULT_CONFIG = {
     "history_pages": 5,
     "discovery_enabled": True,
     "discovery_limit": 10,
+    "discovery_categories": [],
     "fast_interval_sec": 30,
     "group_by_qlt": True,
     "group_by_ptn": True,
@@ -243,6 +250,13 @@ class Store:
         out["lots_pages"] = int(_clamp(out.get("lots_pages"), 1, 10, 2))
         out["history_pages"] = int(_clamp(out.get("history_pages"), 1, 10, 5))
         out["discovery_limit"] = int(_clamp(out.get("discovery_limit"), 1, 50, 10))
+        selected = out.get("discovery_categories") or []
+        if isinstance(selected, str):
+            selected = [selected]
+        out["discovery_categories"] = [
+            str(value) for value in selected
+            if str(value) in DISCOVERY_CATEGORIES
+        ][:20]
         out["fast_interval_sec"] = int(_clamp(out.get("fast_interval_sec"), 10, 300, 30))
         out["scan_interval_min"] = int(_clamp(out.get("scan_interval_min"), 1, 180, 5))
         out["scan_workers"] = int(_clamp(out.get("scan_workers"), 1, 16, 10))
@@ -295,6 +309,7 @@ class Store:
                 "history_pages",
                 "discovery_enabled",
                 "discovery_limit",
+                "discovery_categories",
                 "fast_interval_sec",
                 "scan_interval_min",
                 "scan_workers",
@@ -476,6 +491,10 @@ class ScanManager:
             return max(0, int(data.get("cursor") or 0))
         except (OSError, ValueError, TypeError):
             return 0
+
+    def reset_discovery(self) -> None:
+        self.discovery_cursor = 0
+        self._save_discovery_cursor()
 
     def _save_discovery_cursor(self) -> None:
         try:
@@ -952,7 +971,7 @@ def _icon_candidates(item: str, category: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/2.1"
+    server_version = "SZAUCTRACKER/2.2"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -1183,6 +1202,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/cancel":
                 self.state.manager.cancel()
                 self._json(200, {"cancelling": True})
+            elif path == "/api/discovery/reset":
+                if self.state.manager.is_running():
+                    self._json(409, {"error": "Дождитесь окончания скана, чтобы сбросить курсор"})
+                    return
+                self.state.manager.reset_discovery()
+                self._json(200, {"cursor": self.state.manager.discovery_cursor})
             elif path == "/api/check":
                 self._check_credentials()
             else:
@@ -1283,7 +1308,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"main/global/icons/{candidate}"
             )
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.1"})
+                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.2"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     data = resp.read()
                 if not data:

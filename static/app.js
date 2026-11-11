@@ -418,6 +418,10 @@ function renderSettings() {
   form.elements.discovery_enabled.checked = cfg.discovery_enabled !== false;
   form.elements.discovery_limit.value = cfg.discovery_limit || 10;
   form.elements.fast_interval_sec.value = cfg.fast_interval_sec || 30;
+  const selectedCategories = new Set(cfg.discovery_categories || []);
+  $$("#discoveryCategories [data-discovery-category]").forEach((input) => {
+    input.checked = selectedCategories.has(input.dataset.discoveryCategory);
+  });
 
   $("#secretHint").textContent = cfg.has_secret
     ? "Секрет сохранён. Он не отображается в браузере и не покидает этот компьютер."
@@ -456,6 +460,9 @@ function collectSettings() {
     history_ttl_min: Number(value("history_ttl_min")),
     discovery_enabled: checked("discovery_enabled"),
     discovery_limit: Number(value("discovery_limit")),
+    discovery_categories: $$("#discoveryCategories [data-discovery-category]")
+      .filter((input) => input.checked)
+      .map((input) => input.dataset.discoveryCategory),
     fast_interval_sec: Number(value("fast_interval_sec")),
   };
 }
@@ -521,6 +528,18 @@ function bindSettings() {
     }
   });
 
+  const discoveryReset = $("#discoveryReset");
+  if (discoveryReset) {
+    discoveryReset.addEventListener("click", async () => {
+      try {
+        await api("/api/discovery/reset", { method: "POST", body: {} });
+        toast("Курсор discovery сброшен. Прогресс обновится после следующего скана.", "warn");
+      } catch (error) {
+        toast(error.message, "bad");
+      }
+    });
+  }
+
   $("#clearSecretBtn").addEventListener("click", async () => {
     if (!confirm("Удалить сохранённый Client-Secret?")) return;
     try {
@@ -583,6 +602,7 @@ async function loadResults() {
     state.results = results;
   }
   renderSummary();
+  renderDiscoveryProgress();
   renderCategoryFilter();
   renderBonusFilter();
   renderDeals();
@@ -595,6 +615,33 @@ async function loadResults() {
   $("#stacksBadge").className = `badge${stacks.length ? "" : " muted"}`;
   $("#stackCsvLink").classList.toggle("hidden", !stacks.length);
   if (!state.status || !state.status.running) renderCalcHint();
+}
+
+function renderDiscoveryProgress() {
+  const host = $("#discoveryProgress");
+  if (!host) return;
+  const r = state.results || {};
+  const cfg = state.config || {};
+  if (!r.generated_at) {
+    host.textContent = "Прогресс discovery появится после первого скана.";
+    return;
+  }
+  if (!cfg.discovery_enabled) {
+    host.textContent = "Discovery выключен.";
+    return;
+  }
+  const pool = Number(r.discovery_pool_size || 0);
+  const next = Number(r.discovery_next || 0);
+  if (!pool) {
+    host.textContent = "Discovery: каталог ещё не загружен или нет подходящих предметов.";
+    return;
+  }
+  const pct = Math.min(100, (next / pool) * 100);
+  const remaining = Math.max(0, pool - next);
+  const limit = Math.max(1, Number(cfg.discovery_limit || 10));
+  const minutes = Math.max(1, Number(cfg.scan_interval_min || 5));
+  const hours = (remaining / limit) * minutes / 60;
+  host.textContent = `Discovery: пройдено ${next} из ${pool} (${pct.toFixed(1)}%) · осталось ${remaining} предмет(ов) · ~${hours.toFixed(1)} ч`;
 }
 
 function renderSummary() {

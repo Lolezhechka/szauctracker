@@ -1413,16 +1413,22 @@ def scan(
         raise ApiError("Все предметы отключены в правилах. Включите хотя бы один.")
 
     discovery_items: list[str] = []
+    discovery_pool_size = 0
     discovery_next = int(discovery_start or 0)
     if discovery_limit and catalog is not None and getattr(catalog, "ready", False):
         dead = set(str(x) for x in (dead_ids or []))
         watch_set = set(watchlist)
+        categories = set(str(x) for x in (config.get("discovery_categories") or []))
         pool = sorted({
             str(item["id"])
             for item in getattr(catalog, "items", []) or []
-            if str(item.get("id") or "") and str(item["id"]) not in watch_set and str(item["id"]) not in dead
+            if str(item.get("id") or "")
+            and str(item["id"]) not in watch_set
+            and str(item["id"]) not in dead
+            and (not categories or str(item.get("category") or "").split("/")[0] in categories)
         })
         if pool:
+            discovery_pool_size = len(pool)
             start = discovery_next % len(pool)
             take = min(max(1, int(discovery_limit)), len(pool))
             discovery_items = [pool[(start + offset) % len(pool)] for offset in range(take)]
@@ -1549,6 +1555,7 @@ def scan(
         "watch_items": len(watchlist),
         "discovery_items": len(discovery_items),
         "discovery_next": discovery_next,
+        "discovery_pool_size": discovery_pool_size,
         "discovery_deals_count": len([deal for deal in all_deals if deal.get("source") == "discovery"]),
         "items_no_data": len([item for item in items_out if item["status"] in ("no_data", "no_sales")]),
         "items_errors": len([item for item in items_out if item["status"] == "error"]),

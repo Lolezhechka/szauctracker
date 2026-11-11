@@ -235,6 +235,7 @@ class StoreTests(unittest.TestCase):
             self.assertTrue(store.snapshot()["group_by_stack"])
             self.assertTrue(store.snapshot()["discovery_enabled"])
             self.assertEqual(store.snapshot()["discovery_limit"], 10)
+            self.assertEqual(store.snapshot()["discovery_categories"], [])
             store.update({"scan_workers": 99, "history_ttl_min": 0, "history_pages": 99, "lots_pages": 0, "discovery_limit": 99})
             self.assertEqual(store.snapshot()["scan_workers"], 16)
             self.assertEqual(store.snapshot()["history_ttl_min"], 1)
@@ -838,6 +839,34 @@ class DiscoveryScanTests(unittest.TestCase):
             self.assertEqual(results["items"][1]["source"], "discovery")
             self.assertEqual(results["discovery_deals_count"], 2)
             self.assertTrue(all(deal["source"] == "discovery" for deal in results["deals"] if deal["item_id"] != "a"))
+
+
+class DiscoveryCategoryTests(unittest.TestCase):
+    def test_category_filter_limits_pool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = Catalog(Path(tmp) / "catalog.json")
+            catalog._install([
+                {"id": "a", "category": "other", "name": {"ru": "A"}},
+                {"id": "b", "category": "other", "name": {"ru": "B"}},
+                {"id": "c", "category": "consumables/food", "name": {"ru": "C"}},
+                {"id": "d", "category": "containers", "name": {"ru": "D"}},
+            ])
+            results = scan(
+                FakeClient(), catalog,
+                cfg(watchlist=["a"], scan_workers=1, min_profit=0,
+                    discovery_categories=["consumables"]),
+                discovery_start=0,
+                discovery_limit=5,
+            )
+            self.assertEqual(results["discovery_pool_size"], 1)
+            self.assertEqual([item["id"] for item in results["items"]], ["a", "c"])
+            self.assertEqual(results["discovery_next"], 0)
+
+    def test_categories_sanitized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "config.json")
+            store.update({"discovery_categories": ["consumables", "bad", "other"]})
+            self.assertEqual(store.snapshot()["discovery_categories"], ["consumables", "other"])
 
 
 class CompactResultsTests(unittest.TestCase):

@@ -636,6 +636,21 @@
           <span class="field-hint">для предметов с включённым ⚡ в правиле; максимум 8 предметов</span>
         </label>
       </div>
+      <p class="hint">Категории discovery (ничего не выбрано = все):</p>
+      <div class="discovery-cats" id="discoveryCategories">
+        <label><input type="checkbox" data-discovery-category="artefact"> Артефакты</label>
+        <label><input type="checkbox" data-discovery-category="weapon"> Оружие</label>
+        <label><input type="checkbox" data-discovery-category="armor"> Броня</label>
+        <label><input type="checkbox" data-discovery-category="attachment"> Обвесы</label>
+        <label><input type="checkbox" data-discovery-category="consumables"> Расходники</label>
+        <label><input type="checkbox" data-discovery-category="containers"> Контейнеры</label>
+        <label><input type="checkbox" data-discovery-category="backpacks"> Рюкзаки</label>
+        <label><input type="checkbox" data-discovery-category="bullet"> Патроны</label>
+        <label><input type="checkbox" data-discovery-category="device"> Устройства</label>
+        <label><input type="checkbox" data-discovery-category="other"> Прочее</label>
+      </div>
+      <p class="hint" id="discoveryProgress">Прогресс discovery появится после первого скана.</p>
+      <button type="button" id="discoveryReset" class="btn ghost">Сбросить курсор discovery</button>
       <p class="hint">Лимит API — 400 токенов/мин, один запрос аукциона стоит 2 токена. Приложение само выдерживает темп (~190 запросов/мин), запрашивает предметы параллельно и не тратит запрос истории на предметы без лотов.</p>
       <p class="hint">API отдаёт по <b>200 продаж на страницу</b>. Приложение добирает страницы до выбранного окна, сохраняет продажи в локальную базу и постепенно накапливает полную историю. Если истории всё ещё мало, покрытие будет меньше выбранных дней — реальное покрытие видно в деталях сделки.</p>
     </div>

@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-2.1.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.1/SZAUCTRACKER-Setup-2.1.exe)
+  [SZAUCTRACKER-Setup-2.2.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.2/SZAUCTRACKER-Setup-2.2.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.1/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.2/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 2.1 в свойствах Windows.
+   иконка и версия 2.2 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -179,7 +179,10 @@ Portable-версия ничего не устанавливает: все да�
 
 **Discovery**
 * при включённой настройке каждый скан дополнительно проверяет **10 предметов вне списка наблюдения**;
-* курсор сохраняется, поэтому обход идёт по всему справочнику и не повторяет одни и те же ID;
+* можно ограничить discovery выбранными категориями (артефакты, оружие, расходники и т.д.);
+* курсор сохраняется, поэтому обход идёт по справочнику и не повторяет одни и те же ID;
+* в настройках видно прогресс: сколько пройдено, сколько осталось и примерное время;
+* курсор можно сбросить (только когда скан не идёт);
 * найденные сделки помечаются «вне списка», их можно отфильтровать по источнику;
 * кнопка «＋» добавляет предмет в наблюдение;
 * discovery-предметы не попадают в список наблюдения автоматически.
@@ -405,7 +408,7 @@ barter.py           бартерный калькулятор и котиров�
 fast_monitor.py     быстрый мониторинг новых лотов
 market_store.py     журнал жизненного цикла лотов (SQLite)
 static/             интерфейс (HTML/CSS/JS без внешних зависимостей)
-tests.py            98 тестов логики
+tests.py            100 тестов логики
 start.bat           запуск из исходников в Windows
 SZAUCTRACKER.spec  конфигурация PyInstaller для пересборки
 make_icon.py        генератор иконки (все размеры ICO, включая 16×16)
@@ -440,7 +443,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-2.1.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-2.2.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты
