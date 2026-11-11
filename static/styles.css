@@ -623,6 +623,10 @@ select.input { padding-right: 28px; }
 .item-icon { width: 28px; height: 28px; flex: none; object-fit: contain; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
 .item-icon.missing { display: none; }
 
+.update-banner { display: flex; align-items: center; gap: 10px; margin: 10px 22px 0; padding: 9px 12px; border: 1px solid rgba(168, 224, 95, 0.35); background: rgba(168, 224, 95, 0.08); border-radius: 9px; font-size: 12px; }
+.update-banner b { color: var(--accent); }
+.update-banner .btn.icon { margin-left: auto; }
+
 .fast-feed { margin: 10px 0 4px; border: 1px solid rgba(232, 169, 74, 0.3); background: rgba(232, 169, 74, 0.06); border-radius: 10px; padding: 9px 12px; }
 .fast-feed-head { display: flex; justify-content: space-between; gap: 10px; color: var(--orange); font-size: 11px; font-weight: 700; }
 .fast-feed-head span:last-child { color: var(--muted); font-weight: 400; }

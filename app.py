@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -49,6 +50,8 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
     RESOURCE_DIR = BASE_DIR
 
+APP_VERSION = "2.4"
+GITHUB_REPO = "Lolezhechka/szauctracker"
 DATA_DIR = BASE_DIR / "data"
 STATIC_DIR = RESOURCE_DIR / "static"
 CONFIG_PATH = DATA_DIR / "config.json"
@@ -61,6 +64,8 @@ MARKET_PATH = DATA_DIR / "market.db"
 BARTER_PATH = DATA_DIR / "barter_recipes.json"
 ICONS_DIR = DATA_DIR / "icons"
 DISCOVERY_PATH = DATA_DIR / "discovery.json"
+STARTUP_DIR = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"
+AUTOSTART_LINK = STARTUP_DIR / "SZAUCTRACKER.lnk"
 CACHE_DIR = DATA_DIR / "cache"
 LOG_PATH = DATA_DIR / "app.log"
 BUNDLED_CATALOG = RESOURCE_DIR / "data" / "catalog.json"
@@ -742,6 +747,7 @@ class AppState:
         self.fast = FastMonitor(self.store, self.catalog, self.manager, CACHE_DIR, log_line, self.history)
         self.fast.start()
         self.stop_event = threading.Event()
+        self.update_cache = {"at": 0.0, "data": None}
 
     def close(self) -> None:
         try:
@@ -971,7 +977,7 @@ def _icon_candidates(item: str, category: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SZAUCTRACKER/2.3"
+    server_version = f"SZAUCTRACKER/{APP_VERSION}"
     state: AppState = None  # задаётся при создании класса
 
     # ------------------------------------------------------------- ответы
@@ -1061,6 +1067,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._backup()
             elif path == "/api/signals":
                 self._signals(query)
+            elif path == "/api/update":
+                self._update()
+            elif path == "/api/autostart":
+                self._json(200, {"enabled": AUTOSTART_LINK.exists(), "available": bool(FROZEN or (BASE_DIR / "SZAUCTRACKER.exe").exists())})
             elif path == "/api/portfolio":
                 self._portfolio()
             elif path == "/api/regions":
@@ -1146,6 +1156,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(
                     200,
                     {
+                        "version": APP_VERSION,
                         "config": _safe_config(config),
                         "catalog_ready": self.state.catalog.ready,
                     },
@@ -1202,6 +1213,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/cancel":
                 self.state.manager.cancel()
                 self._json(200, {"cancelling": True})
+            elif path == "/api/autostart":
+                payload = self._read_json()
+                result = self._set_autostart(bool(payload.get("enabled")))
+                self._json(200, result)
             elif path == "/api/discovery/reset":
                 if self.state.manager.is_running():
                     self._json(409, {"error": "Дождитесь окончания скана, чтобы сбросить курсор"})
@@ -1308,7 +1323,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"main/global/icons/{candidate}"
             )
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "SZAUCTRACKER/2.3"})
+                req = urllib.request.Request(url, headers={"User-Agent": f"SZAUCTRACKER/{APP_VERSION}"})
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     data = resp.read()
                 if not data:
@@ -1359,6 +1374,69 @@ class Handler(BaseHTTPRequestHandler):
             category = meta.get("category", "other")
         summary.update({"name": name, "category": category})
         self._json(200, summary)
+
+    def _set_autostart(self, enabled: bool) -> dict:
+        exe = Path(sys.executable).resolve() if FROZEN else BASE_DIR / "SZAUCTRACKER.exe"
+        if not exe.exists():
+            return {"enabled": False, "available": False, "error": "Автозапуск доступен только для exe"}
+        try:
+            if enabled:
+                STARTUP_DIR.mkdir(parents=True, exist_ok=True)
+                def quote(value):
+                    return "'" + str(value).replace("'", "''") + "'"
+                script = (
+                    "$ws=New-Object -ComObject WScript.Shell; "
+                    f"$s=$ws.CreateShortcut({quote(AUTOSTART_LINK)}); "
+                    f"$s.TargetPath={quote(exe)}; "
+                    f"$s.WorkingDirectory={quote(exe.parent)}; "
+                    f"$s.IconLocation={quote(str(exe) + ',0')}; "
+                    "$s.Save()"
+                )
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                    check=True, capture_output=True, timeout=20,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            elif AUTOSTART_LINK.exists():
+                AUTOSTART_LINK.unlink()
+        except Exception as exc:
+            return {"enabled": AUTOSTART_LINK.exists(), "available": True, "error": str(exc)}
+        return {"enabled": AUTOSTART_LINK.exists(), "available": True}
+
+    def _update(self) -> None:
+        now = time.time()
+        cache = self.state.update_cache
+        if cache["data"] is not None and now - cache["at"] < 6 * 3600:
+            self._json(200, cache["data"])
+            return
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": f"SZAUCTRACKER/{APP_VERSION}",
+                "Accept": "application/vnd.github+json",
+            })
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                release = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            self._json(200, {"current": APP_VERSION, "error": str(exc), "available": False})
+            return
+        latest = str(release.get("tag_name") or "").lstrip("vV")
+        def key(value):
+            return tuple(int(x) for x in re.findall(r"\d+", str(value))[:4])
+        assets = {asset.get("name"): asset.get("browser_download_url") for asset in release.get("assets") or []}
+        data = {
+            "current": APP_VERSION,
+            "latest": latest,
+            "available": bool(latest and key(latest) > key(APP_VERSION)),
+            "name": release.get("name") or release.get("tag_name"),
+            "url": release.get("html_url"),
+            "installer_url": next((url for name, url in assets.items() if name.startswith("SZAUCTRACKER-Setup")), None),
+            "portable_url": assets.get("SZAUCTRACKER.exe"),
+            "published_at": release.get("published_at"),
+        }
+        cache["at"] = now
+        cache["data"] = data
+        self._json(200, data)
 
     def _signals(self, query) -> None:
         try:

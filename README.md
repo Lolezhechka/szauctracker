@@ -16,16 +16,16 @@ API и считает цифры. Помимо поиска отдельных �
 ## Скачать
 
 * **Установщик (Windows 10/11 x64):**
-  [SZAUCTRACKER-Setup-2.3.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.3/SZAUCTRACKER-Setup-2.3.exe)
+  [SZAUCTRACKER-Setup-2.4.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.4/SZAUCTRACKER-Setup-2.4.exe)
 * **Portable-версия:**
-  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.3/SZAUCTRACKER.exe)
+  [SZAUCTRACKER.exe](https://github.com/Lolezhechka/szauctracker/releases/download/v2.4/SZAUCTRACKER.exe)
 * Все релизы: [github.com/Lolezhechka/szauctracker/releases](https://github.com/Lolezhechka/szauctracker/releases)
 
 ## Быстрый старт
 
 1. Установите приложение через установщик или запустите portable **`SZAUCTRACKER.exe`**.
    Python не нужен. Откроется окно управления и браузер с интерфейсом. У exe собственная
-   иконка и версия 2.3 в свойствах Windows.
+   иконка и версия 2.4 в свойствах Windows.
 2. Получите ключи API у Telegram-бота [@stalzone_api_bot](https://t.me/stalzone_api_bot):
    `/newapp` → заполните заявку → после одобрения бот выдаст `Client-Id` и `Client-Secret`.
 3. Вкладка **Настройки** → вставьте ключи → **Проверить доступ** → **Сохранить и сканировать**.
@@ -272,6 +272,13 @@ Portable-версия ничего не устанавливает: все да�
 * ⚡-правило и интервал быстрого мониторинга (10–300 секунд);
 * автоскан и интервал.
 
+## Обновления и автозапуск
+
+* приложение проверяет последний GitHub Release и показывает баннер, если доступна новая версия;
+* обновление скачивается вручную, автоматической замены exe нет;
+* в настройках можно включить **запуск при входе в Windows** (ярлык в папке Startup);
+* для portable/установленной версии автозапуск указывает на текущий exe.
+
 ## Надёжность и данные
 
 * один общий бюджет API для скана, быстрого мониторинга и бартера;
@@ -446,7 +453,7 @@ installer\build_installer.bat
 ```
 
 Скрипт `installer\SZAUCTRACKER.iss` кладёт готовый установщик в
-`dist\installer\SZAUCTRACKER-Setup-2.3.exe`. Установка per-user, без UAC; данные
+`dist\installer\SZAUCTRACKER-Setup-2.4.exe`. Установка per-user, без UAC; данные
 пользователя при удалении сохраняются.
 
 ## Тесты

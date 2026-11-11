@@ -24,6 +24,11 @@
 </header>
 
 <div id="banner" class="banner hidden"></div>
+<div id="updateBanner" class="update-banner hidden">
+  <span>Доступна новая версия <b id="updateVersion"></b></span>
+  <a id="updateLink" class="btn small primary" href="#" target="_blank" rel="noreferrer">Скачать</a>
+  <button type="button" id="updateDismiss" class="btn icon" title="Скрыть">×</button>
+</div>
 
 <nav class="tabs">
   <button class="tab active" data-tab="deals">Сделки <span id="dealsBadge" class="badge">0</span></button>
@@ -644,6 +649,7 @@
           <input name="fast_interval_sec" class="input" type="number" min="10" max="300" step="5">
           <span class="field-hint">для предметов с включённым ⚡ в правиле; максимум 8 предметов</span>
         </label>
+        <label class="check-line"><input type="checkbox" id="autostartToggle"> Запускать при входе в Windows</label>
       </div>
       <p class="hint">Категории discovery (ничего не выбрано = все):</p>
       <div class="discovery-cats" id="discoveryCategories">

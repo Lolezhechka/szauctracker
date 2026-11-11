@@ -528,6 +528,9 @@ function bindSettings() {
     }
   });
 
+  const autostartToggle = $("#autostartToggle");
+  if (autostartToggle) autostartToggle.addEventListener("change", toggleAutostart);
+
   const discoveryReset = $("#discoveryReset");
   if (discoveryReset) {
     discoveryReset.addEventListener("click", async () => {
@@ -2253,6 +2256,52 @@ function updateWatchEstimate() {
 
 // ------------------------------------------------------------------ старт
 
+async function loadAutostart() {
+  const toggle = $("#autostartToggle");
+  if (!toggle) return;
+  try {
+    const data = await api("/api/autostart");
+    toggle.checked = !!data.enabled;
+    toggle.disabled = !data.available;
+    toggle.title = data.available ? "Создать ярлык в папке автозапуска Windows" : (data.error || "Доступно только в exe-версии");
+  } catch (error) {
+    toggle.disabled = true;
+    toggle.title = error.message;
+  }
+}
+
+async function toggleAutostart() {
+  const toggle = $("#autostartToggle");
+  try {
+    const data = await api("/api/autostart", { method: "POST", body: { enabled: toggle.checked } });
+    if (data.error) throw new Error(data.error);
+    toggle.checked = !!data.enabled;
+    toast(data.enabled ? "Автозапуск включён" : "Автозапуск выключен");
+  } catch (error) {
+    toggle.checked = !toggle.checked;
+    toast(error.message, "bad");
+  }
+}
+
+async function checkUpdate() {
+  try {
+    const data = await api("/api/update");
+    if (!data.available || !data.latest) return;
+    const dismissed = localStorage.getItem("updateDismissed");
+    if (dismissed === data.latest) return;
+    $("#updateVersion").textContent = data.latest;
+    const link = $("#updateLink");
+    link.href = data.installer_url || data.url || "#";
+    $("#updateBanner").classList.remove("hidden");
+    $("#updateDismiss").onclick = () => {
+      localStorage.setItem("updateDismissed", data.latest);
+      $("#updateBanner").classList.add("hidden");
+    };
+  } catch (error) {
+    // Проверка обновлений не критична.
+  }
+}
+
 async function init() {
   bindTabs();
   bindDealsControls();
@@ -2269,6 +2318,8 @@ async function init() {
 
   try {
     await loadConfig();
+    checkUpdate();
+    loadAutostart();
     await renderAnalyticsItems();
     await renderMovementItems();
     if (location.hash === "#movement") await ensureMovement();
